@@ -1,0 +1,13 @@
+{
+  "token": "",
+  "clientId": "",
+  "clientSecret": "",
+  "redirectUri": "",
+  "scopes": "",
+  "refreshToken": "",
+  "accessToken": "",
+  "accessTokenExpiresAt": "",
+  "deviceId": "",
+  "deviceLabel": "",
+  "pcInput": ""
+}

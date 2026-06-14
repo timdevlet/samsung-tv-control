@@ -1,0 +1,5 @@
+node_modules/
+# Holds the SmartThings token / device id — must not be committed.
+smartthings-config.json
+# Runtime log written by the hidden daemon launcher.
+*.log

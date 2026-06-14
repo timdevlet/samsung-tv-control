@@ -1,0 +1,30 @@
+{
+  "name": "samsung-tv-control",
+  "version": "1.0.0",
+  "description": "Wake a Samsung TV and switch its input to PC via the SmartThings cloud API.",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/timdevlet/samsung-tv-control.git"
+  },
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "daemon": "tsx src/daemon.ts",
+    "daemon:tvoff": "tsx src/daemon.ts --tv_off",
+    "daemon:tvon": "tsx src/daemon.ts --tv_on",
+    "daemon:tvsync": "tsx src/daemon.ts --tv_off --tv_on",
+    "login": "tsx src/index.ts --login",
+    "devices": "tsx src/index.ts --devices",
+    "reset": "tsx src/index.ts --reset",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-global-key-listener": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
