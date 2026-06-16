@@ -1,9 +1,10 @@
-// Long-running daemon: listens for a global hotkey and, on press, wakes the TV
-// and switches it to the PC input. Run with: npm run daemon
+// Long-running daemon: listens for global hotkeys and acts on the TV. Run with: npm run daemon
 //
-// Hotkey:
-//   macOS    -> Cmd + Ctrl + E
-//   Win/Linux-> Ctrl + Alt + E
+// Hotkeys:
+//   Wake TV + switch to PC      macOS -> Cmd+Ctrl+E    Win/Linux -> Ctrl+Alt+E
+//   Turn TV off + sleep this PC macOS -> Cmd+Ctrl+Q    Win/Linux -> Ctrl+Alt+Q
+//
+// The off+sleep hotkey turns the TV off, waits 2s, then puts this PC to sleep.
 //
 // macOS note: global key capture needs Accessibility permission. The first run
 // will prompt (or grant it under System Settings → Privacy & Security →
@@ -19,7 +20,8 @@ import {
   type IGlobalKeyDownMap,
 } from "node-global-key-listener";
 import { run, turnOff } from "./index.js";
-import { watchPower } from "./sleep-watch.js";
+import { sleepPc } from "./pc-sleep.js";
+import { watchWake } from "./wake-watch.js";
 
 /**
  * The listener ships an unexecutable helper binary; npm drops the +x bit. If the
@@ -47,7 +49,11 @@ function ensureKeyServerExecutable(): void {
 }
 
 const isMac = process.platform === "darwin";
-const COMBO_LABEL = isMac ? "Cmd+Ctrl+E" : "Ctrl+Alt+E";
+const ON_COMBO_LABEL = isMac ? "Cmd+Ctrl+E" : "Ctrl+Alt+E";
+const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
+
+/** Delay between turning the TV off and putting the PC to sleep. */
+const OFF_TO_SLEEP_MS = 2000;
 
 /** Cooldown after a trigger so key auto-repeat / a held combo can't double-fire. */
 const COOLDOWN_MS = 1500;
@@ -55,10 +61,11 @@ let busy = false;
 
 const stamp = () => new Date().toLocaleTimeString();
 
-async function trigger(): Promise<void> {
+/** Wake the TV and switch it to the PC input (Cmd/Ctrl + E). */
+async function triggerOn(): Promise<void> {
   if (busy) return;
   busy = true;
-  console.log(`\n[${stamp()}] ${COMBO_LABEL} → waking TV and switching to PC...`);
+  console.log(`\n[${stamp()}] ${ON_COMBO_LABEL} → waking TV and switching to PC...`);
   try {
     await run();
   } catch (err) {
@@ -70,13 +77,16 @@ async function trigger(): Promise<void> {
   }
 }
 
-/** On PC sleep: turn the TV off (only if it's on the PC input). Shares the busy guard. */
-async function onSuspend(): Promise<void> {
+/** Turn the TV off, wait 2s, then put this PC to sleep (Cmd/Ctrl + Q). */
+async function triggerOffAndSleep(): Promise<void> {
   if (busy) return;
   busy = true;
-  console.log(`\n[${stamp()}] PC entering sleep → checking TV...`);
+  console.log(`\n[${stamp()}] ${OFF_COMBO_LABEL} → turning TV off, then sleeping this PC...`);
   try {
     await turnOff();
+    await new Promise<void>((r) => setTimeout(r, OFF_TO_SLEEP_MS));
+    console.log(`[${stamp()}] Putting this PC to sleep...`);
+    await sleepPc();
   } catch (err) {
     console.error(`[${stamp()}] failed: ${err instanceof Error ? err.message : String(err)}`);
   } finally {
@@ -86,25 +96,9 @@ async function onSuspend(): Promise<void> {
   }
 }
 
-/** On PC resume from sleep: wake the TV and switch it to PC (no-op if already on). */
-async function onResume(): Promise<void> {
-  if (busy) return;
-  busy = true;
-  console.log(`\n[${stamp()}] PC resumed from sleep → waking TV and switching to PC...`);
-  try {
-    await run();
-  } catch (err) {
-    console.error(`[${stamp()}] failed: ${err instanceof Error ? err.message : String(err)}`);
-  } finally {
-    setTimeout(() => {
-      busy = false;
-    }, COOLDOWN_MS);
-  }
-}
-
-/** True when the configured combo is fully held and "E" is the key going down. */
-function isHotkey(e: IGlobalKeyEvent, down: IGlobalKeyDownMap): boolean {
-  if (e.state !== "DOWN" || e.name !== "E") return false;
+/** True when the configured modifiers are held and `key` is the key going down. */
+function isHotkey(e: IGlobalKeyEvent, down: IGlobalKeyDownMap, key: string): boolean {
+  if (e.state !== "DOWN" || e.name !== key) return false;
   const ctrl = Boolean(down["LEFT CTRL"] || down["RIGHT CTRL"]);
   const alt = Boolean(down["LEFT ALT"] || down["RIGHT ALT"]);
   const meta = Boolean(down["LEFT META"] || down["RIGHT META"]);
@@ -116,31 +110,26 @@ async function main(): Promise<void> {
   const keyboard = new GlobalKeyboardListener();
 
   await keyboard.addListener((e, down) => {
-    if (isHotkey(e, down)) void trigger();
+    if (isHotkey(e, down, "E")) void triggerOn();
+    else if (isHotkey(e, down, "Q")) void triggerOffAndSleep();
   });
 
-  console.log(`TV daemon running. Press ${COMBO_LABEL} to wake the TV and switch to PC.`);
+  const stopWake = watchWake({
+    onResume: (sleptMs) => {
+      const mins = Math.round(sleptMs / 60_000);
+      console.log(`\n[${stamp()}] PC woke from sleep (~${mins} min) → waking TV if it was off...`);
+      void triggerOn(); // run() powers on only if off, then switches to PC input
+    },
+  });
 
-  // Opt-in: react to the PC sleeping (--tv_off) and/or resuming (--tv_on). Both ride the same
-  // Windows power-event subscription, so one watcher covers either or both flags.
-  const args = process.argv.slice(2);
-  const tvOff = args.includes("--tv_off");
-  const tvOn = args.includes("--tv_on");
-  
-  let stopPowerWatch: () => void = () => {};
-  if (tvOff || tvOn) {
-    stopPowerWatch = watchPower({
-      onSuspend: tvOff ? () => void onSuspend() : undefined,
-      onResume: tvOn ? () => void onResume() : undefined,
-    });
-    if (tvOff) console.log("Watching for PC sleep — will turn the TV off when it's on the PC input.");
-    if (tvOn) console.log("Watching for PC resume — will wake the TV and switch to PC on wake.");
-  }
-
+  console.log("TV daemon running.");
+  console.log(`  ${ON_COMBO_LABEL}  → wake the TV and switch to PC`);
+  console.log(`  ${OFF_COMBO_LABEL}  → turn the TV off, then sleep this PC`);
+  console.log("  Auto-wakes the TV when this PC resumes from sleep.");
   console.log("Press Ctrl+C to quit.");
 
   const shutdown = () => {
-    stopPowerWatch();
+    stopWake();
     keyboard.kill();
     process.exit(0);
   };

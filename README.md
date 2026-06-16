@@ -58,10 +58,7 @@ cp smartthings-config.example.json smartthings-config.json
 ```sh
 npm start              # find TV → turn on → switch to the configured input
 npm start -- --hdmi 3  # same, but switch to HDMI 3 this run (overrides pcInput)
-npm run daemon         # stay running; trigger on a global hotkey (see below)
-npm run daemon:tvoff   # daemon + turn TV off when the PC sleeps (Windows only)
-npm run daemon:tvon    # daemon + turn TV on when the PC wakes  (Windows only)
-npm run daemon:tvsync  # daemon + both of the above             (Windows only)
+npm run daemon         # stay running; trigger on global hotkeys (see below)
 npm run login          # one-time OAuth authorize (auto-refreshing token)
 npm run devices        # list account devices + capabilities (to identify the TV)
 npm run reset          # forget the cached device id / token
@@ -69,13 +66,22 @@ npm run reset          # forget the cached device id / token
 
 ### Daemon + global hotkey
 
-`npm run daemon` runs forever and fires the same wake-and-switch-to-PC action when you
-press a global hotkey from anywhere:
+`npm run daemon` runs forever and listens for two global hotkeys from anywhere:
 
-| OS | Hotkey |
-| --- | --- |
-| macOS | **Cmd + Ctrl + E** |
-| Windows / Linux | **Ctrl + Alt + E** |
+| Action | macOS | Windows / Linux |
+| --- | --- | --- |
+| Wake the TV + switch to PC | **Cmd + Ctrl + E** | **Ctrl + Alt + E** |
+| Turn the TV off, then sleep this PC | **Cmd + Ctrl + Q** | **Ctrl + Alt + Q** |
+
+The off-and-sleep hotkey turns the TV off — but **only if it's currently on the PC input**, so
+it won't switch off a TV you've put on another source — then waits 2 seconds and puts this PC to
+sleep (`pmset sleepnow` on macOS, `SetSuspendState` on Windows, `systemctl suspend` on Linux).
+
+The daemon also **wakes the TV automatically when this PC resumes from sleep**. It detects wake
+with a simple heartbeat: a timer ticks every few seconds, and a large gap between ticks means the
+process was frozen (the PC slept). On wake it turns the TV on (only if it was off) and switches to
+PC, then pauses detection for 5 minutes so it can't re-fire. This works on all platforms — no
+extra setup.
 
 It uses [`node-global-key-listener`](https://www.npmjs.com/package/node-global-key-listener)
 (ships a small helper binary — no Electron). A 1.5s cooldown prevents key auto-repeat
@@ -88,28 +94,6 @@ from double-firing.
 
 To keep it running across reboots, use a process manager (pm2), a macOS `launchd` agent,
 or Windows Task Scheduler. See [Run on Windows startup](#run-on-windows-startup) below.
-
-#### Follow PC sleep/wake (`--tv_off` / `--tv_on`, Windows only)
-
-```sh
-npm run daemon:tvoff        # = npm run daemon -- --tv_off          (off on sleep)
-npm run daemon:tvon         # = npm run daemon -- --tv_on           (on on wake)
-npm run daemon:tvsync       # = npm run daemon -- --tv_off --tv_on  (both)
-```
-
-- **`--tv_off`** watches for the PC **entering sleep** and turns the TV off — but **only if the
-  TV is currently on the PC input**, so it won't switch off a TV you've put on another source.
-  The off-command goes out while the PC is still awake.
-- **`--tv_on`** watches for the PC **resuming from sleep** and wakes the TV + switches it to the
-  PC input (the same action as the hotkey). It's idempotent — if the TV is already on the right
-  input, nothing changes.
-
-Both flags share a single Windows `Win32_PowerManagementEvent` subscriber (suspend = EventType
-4, resume = 7/18) run via a bundled PowerShell process, so you can pass either or both. This is
-**Windows-only**; on macOS/Linux the flags log a warning and the daemon otherwise runs normally.
-
-To enable at startup, edit `shortcuts/TV-DAEMON.vbs` and change `npm run daemon` to e.g.
-`npm run daemon:tvsync`.
 
 `--hdmi <n>` (n = 1–4) picks the input for that run without editing config; the
 shorthands `--hdmi=3` and `--hdmi3` also work. Without it, `pcInput` from
