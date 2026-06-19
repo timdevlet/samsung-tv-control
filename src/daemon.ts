@@ -14,6 +14,7 @@ import "./node-compat.js"; // must load before node-global-key-listener (see fil
 import { chmodSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
+import os from "node:os";
 import {
   GlobalKeyboardListener,
   type IGlobalKeyEvent,
@@ -55,15 +56,23 @@ const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
 /** Delay between turning the TV off and putting the PC to sleep. */
 const OFF_TO_SLEEP_MS = 2000;
 
-/** Cooldown after a trigger so key auto-repeat / a held combo can't double-fire. */
-const COOLDOWN_MS = 1500;
+/**
+ * Cooldown after a trigger finishes. A new trigger is ignored while a handler is
+ * running or within this window afterwards — so commands fire at most once per ~2s
+ * and key auto-repeat / a held combo can't double-fire. Each handler still makes
+ * all of its own API calls without delay; only re-triggering is rate-limited.
+ */
+const COOLDOWN_MS = 2000;
 let busy = false;
 
 const stamp = () => new Date().toLocaleTimeString();
 
 /** Wake the TV and switch it to the PC input (Cmd/Ctrl + E). */
 async function triggerOn(): Promise<void> {
-  if (busy) return;
+  if (busy) {
+    console.log(`[${stamp()}] ${ON_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
+    return;
+  }
   busy = true;
   console.log(`\n[${stamp()}] ${ON_COMBO_LABEL} → waking TV and switching to PC...`);
   try {
@@ -79,7 +88,10 @@ async function triggerOn(): Promise<void> {
 
 /** Turn the TV off, wait 2s, then put this PC to sleep (Cmd/Ctrl + Q). */
 async function triggerOffAndSleep(): Promise<void> {
-  if (busy) return;
+  if (busy) {
+    console.log(`[${stamp()}] ${OFF_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
+    return;
+  }
   busy = true;
   console.log(`\n[${stamp()}] ${OFF_COMBO_LABEL} → turning TV off, then sleeping this PC...`);
   try {
@@ -113,6 +125,16 @@ async function main(): Promise<void> {
     if (isHotkey(e, down, "E")) void triggerOn();
     else if (isHotkey(e, down, "Q")) void triggerOffAndSleep();
   });
+
+  // If the daemon started right after the machine powered on (e.g. launched as a
+  // boot/login item), the PC's wake happened before any tick existed, so watchWake
+  // can't detect it. Reconcile once: ensure the TV is on and on PC input.
+  // os.uptime() is seconds since system boot (not process start), cross-platform.
+  const BOOT_WINDOW_S = 120;
+  if (os.uptime() < BOOT_WINDOW_S) {
+    console.log(`\n[${stamp()}] Daemon started near boot → waking TV if it was off...`);
+    void triggerOn(); // powers on only if off, then switches to PC input
+  }
 
   const stopWake = watchWake({
     onResume: (sleptMs) => {
