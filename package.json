@@ -14,7 +14,9 @@
     "login": "tsx src/index.ts --login",
     "devices": "tsx src/index.ts --devices",
     "reset": "tsx src/index.ts --reset",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "node-global-key-listener": "^0.3.0"
@@ -22,6 +24,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9"
   }
 }

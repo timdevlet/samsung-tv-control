@@ -6,6 +6,8 @@
 // Best-effort: rejects if the command can't be spawned or exits non-zero.
 
 import { spawn } from "node:child_process";
+import os from "node:os";
+import type { SystemControl } from "./interfaces.js";
 
 function suspendCommand(): { cmd: string; args: string[] } {
   switch (process.platform) {
@@ -35,3 +37,9 @@ export function sleepPc(): Promise<void> {
     });
   });
 }
+
+/** Production SystemControl: real OS sleep + system uptime. */
+export const osSystemControl: SystemControl = {
+  sleepPc,
+  uptimeSeconds: () => os.uptime(),
+};
