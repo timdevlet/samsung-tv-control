@@ -7,7 +7,7 @@
 
 import { spawn } from "node:child_process";
 import os from "node:os";
-import type { SystemControl } from "./interfaces.js";
+import type { SystemControl } from "../interfaces.js";
 
 function suspendCommand(): { cmd: string; args: string[] } {
   switch (process.platform) {

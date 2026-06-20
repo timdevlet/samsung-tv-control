@@ -1,11 +1,11 @@
-import { parseStatus, mainCapabilities, pickTV } from "./domain.js";
-import type { STDevice, TVStatus, RawStatus, RawDevice } from "./domain.js";
-import type { TVApi } from "./interfaces.js";
+import { parseStatus, mainCapabilities, pickTV } from "../domain.js";
+import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain.js";
+import type { TVApi } from "../interfaces.js";
 
 const BASE = "https://api.smartthings.com/v1";
 
 // Re-export the shapes from their new home so existing importers keep working.
-export type { STDevice, InputSource, TVStatus } from "./domain.js";
+export type { STDevice, InputSource, TVStatus } from "../domain.js";
 
 /** Minimal SmartThings REST client (cloud control — no LAN access needed). */
 export class SmartThings implements TVApi {

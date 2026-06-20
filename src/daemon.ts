@@ -10,7 +10,7 @@
 // will prompt (or grant it under System Settings → Privacy & Security →
 // Accessibility for your terminal app), otherwise no key events arrive.
 
-import "./node-compat.js"; // must load before node-global-key-listener (see file)
+import "./os/node-compat.js"; // must load before node-global-key-listener (see file)
 import { fileURLToPath } from "node:url";
 import { run, turnOff } from "./index.js";
 import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform } from "./domain.js";

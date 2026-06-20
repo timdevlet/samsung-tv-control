@@ -14,8 +14,8 @@ import {
   type IGlobalKeyEvent,
   type IGlobalKeyDownMap,
 } from "node-global-key-listener";
-import type { KeyEvent, ModifierState } from "./domain.js";
-import type { KeyListener } from "./interfaces.js";
+import type { KeyEvent, ModifierState } from "../domain.js";
+import type { KeyListener } from "../interfaces.js";
 
 function ensureKeyServerExecutable(): void {
   if (process.platform === "win32") return; // .exe needs no chmod

@@ -7,11 +7,11 @@ import {
   DEFAULT_SCOPES,
   type TVConfig,
   type TokenResponse,
-} from "./domain.js";
-import type { OAuthClient, ConfigStore, Clock } from "./interfaces.js";
+} from "../domain.js";
+import type { OAuthClient, ConfigStore, Clock } from "../interfaces.js";
 
 // Pure helpers are re-exported from their new home for existing importers.
-export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "./domain.js";
+export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "../domain.js";
 
 // SmartThings OAuth 2.0 token endpoint.
 const TOKEN_URL = "https://auth-global.api.smartthings.com/oauth/token";

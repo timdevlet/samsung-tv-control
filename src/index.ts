@@ -1,8 +1,11 @@
 import { fileURLToPath } from "node:url";
 import { resolveToken, type TVConfig } from "./config.js";
-import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./oauth.js";
+import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
 import { pickInput, isOnInput, parseHdmiFlag } from "./domain.js";
 import { buildDeps, type Deps, type TVApi } from "./interfaces.js";
+
+/** Time to let the TV settle after a cloud power-on before switching its input. */
+const POWER_ON_SETTLE_MS = 500;
 
 /**
  * Resolve a usable access token. Precedence:
@@ -80,13 +83,20 @@ export async function run(inputOverride?: string, deps?: Deps): Promise<void> {
   const st = d.tvApi(await resolveAccessToken(config, d));
   const deviceId = await resolveDevice(st, config, d);
 
-  // 1) Always power on — no state check (SmartThings wakes the TV from standby over the cloud).
-  log("Turning the TV on...");
-  await st.powerOn(deviceId);
+  // 1) Check status first; if off, wake it and give it a moment to settle before switching
+  // input (a setInputSource sent mid-wake can be dropped). We re-read after waking because the
+  // off-state status often doesn't include the input-source map.
+  let status = await st.getStatus(deviceId);
+  if (status.power !== "on") {
+    log("TV is off — turning it on...");
+    await st.powerOn(deviceId);
+    await d.clock.sleep(POWER_ON_SETTLE_MS);
+    status = await st.getStatus(deviceId);
+  } else {
+    log("TV is already on.");
+  }
 
-  // 2) Always switch the input to the PC — no "already on it" check. We still read status once
-  // to resolve the TV's input-capability id and map config.pcInput to a real source id.
-  const status = await st.getStatus(deviceId);
+  // 2) Switch the input to the PC, skipping when it's already on the target.
   const capability = status.inputCapability;
   if (!capability) {
     throw new Error(
@@ -94,8 +104,12 @@ export async function run(inputOverride?: string, deps?: Deps): Promise<void> {
     );
   }
   const target = pickInput(status, config.pcInput);
-  log(`Switching input to ${target} (PC)...`);
-  await st.setInputSource(deviceId, capability, target);
+  if (isOnInput(status, target)) {
+    log(`Input is already on ${target}.`);
+  } else {
+    log(`Switching input to ${target} (PC)...`);
+    await st.setInputSource(deviceId, capability, target);
+  }
 
   log("Done — TV is on and switched to PC.");
 }

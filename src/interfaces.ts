@@ -124,11 +124,11 @@ export const readlinePrompter: Prompter = {
  * native key-listener library.
  */
 export async function buildDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
-  const { SmartThings } = await import("./smartthings.js");
+  const { SmartThings } = await import("./api/smartthings.js");
   const { fileConfigStore } = await import("./config.js");
-  const { httpOAuthClient } = await import("./oauth.js");
-  const { osSystemControl } = await import("./pc-sleep.js");
-  const { heartbeatWakeNotifier } = await import("./wake-watch.js");
+  const { httpOAuthClient } = await import("./api/oauth.js");
+  const { osSystemControl } = await import("./os/pc-sleep.js");
+  const { heartbeatWakeNotifier } = await import("./os/wake-watch.js");
 
   const clock = overrides.clock ?? systemClock;
 
@@ -164,6 +164,6 @@ export async function buildDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
  */
 export async function buildDaemonDeps(overrides: Partial<Deps> = {}): Promise<Deps> {
   if (overrides.keyListener) return buildDeps(overrides);
-  const { globalKeyListener } = await import("./key-listener.js");
+  const { globalKeyListener } = await import("./os/key-listener.js");
   return buildDeps({ ...overrides, keyListener: globalKeyListener() });
 }

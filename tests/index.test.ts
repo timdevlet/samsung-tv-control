@@ -18,26 +18,27 @@ beforeEach(() => {
 });
 
 describe("run()", () => {
-  it("always powers on and switches input, with no state checks", async () => {
-    // Even when the TV is already on and already on the PC input, both commands fire.
-    const api = new FakeTVApi([onPc]);
+  it("when off: powers on, re-reads status, then switches input", async () => {
+    // First read sees it off; after wake the second read sees it on the wrong input.
+    const api = new FakeTVApi([offStatus, onWrongInput]);
     await run(undefined, fakeDeps({ tvApi: () => api, config: cachedConfig() }));
-    expect(api.calls).toContain("powerOn");
+    expect(api.calls).toEqual(["getStatus", "powerOn", "getStatus", "setInputSource"]);
     expect(api.setInputCalls).toEqual([{ deviceId: "tv1", capability: "mediaInputSource", source: "HDMI2" }]);
   });
 
-  it("reads status only once (no power-on poll loop)", async () => {
-    const api = new FakeTVApi([offStatus]);
+  it("when on but on the wrong input: no powerOn, single status read, switches input", async () => {
+    const api = new FakeTVApi([onWrongInput]);
     await run(undefined, fakeDeps({ tvApi: () => api, config: cachedConfig() }));
+    expect(api.calls).not.toContain("powerOn");
     expect(api.calls.filter((c) => c === "getStatus").length).toBe(1);
-    expect(api.calls).toContain("powerOn");
-    expect(api.calls).toContain("setInputSource");
+    expect(api.setInputCalls).toEqual([{ deviceId: "tv1", capability: "mediaInputSource", source: "HDMI2" }]);
   });
 
-  it("switches input even when already on the target", async () => {
+  it("when on and already on the target input: does nothing further", async () => {
     const api = new FakeTVApi([onPc]);
     await run(undefined, fakeDeps({ tvApi: () => api, config: cachedConfig() }));
-    expect(api.setInputCalls).toEqual([{ deviceId: "tv1", capability: "mediaInputSource", source: "HDMI2" }]);
+    expect(api.calls).not.toContain("powerOn");
+    expect(api.setInputCalls).toEqual([]);
   });
 
   it("throws when the device exposes no input capability", async () => {

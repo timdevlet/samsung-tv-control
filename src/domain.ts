@@ -1,7 +1,8 @@
 // Pure decision logic — no I/O, no node:* APIs, no fetch/Date.now/timers, no process.
 // Everything here is deterministic given its inputs, so it can be unit-tested directly.
 // Side effects live behind the interfaces in interfaces.ts; the concrete files (index.ts,
-// smartthings.ts, oauth.ts, config.ts, daemon.ts, ...) call into these helpers.
+// daemon.ts, config.ts, the api/ cloud adapters, and the os/ system adapters) call into
+// these helpers.
 
 // --- Shared domain types (single source of truth; other files import from here) ---
 

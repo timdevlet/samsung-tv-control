@@ -8,8 +8,8 @@
 // The gap/pause math lives in domain.WakeDetector (pure, testable); this file is the adapter
 // that drives it on a real interval via the injected Clock.
 
-import { WakeDetector } from "./domain.js";
-import type { Clock, WakeNotifier } from "./interfaces.js";
+import { WakeDetector } from "../domain.js";
+import type { Clock, WakeNotifier } from "../interfaces.js";
 
 const TICK_MS = 3000;
 /** A tick this far (or more) past the previous one means the loop was frozen → the PC slept. */
