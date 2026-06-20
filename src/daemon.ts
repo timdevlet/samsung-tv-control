@@ -11,10 +11,12 @@
 // Accessibility for your terminal app), otherwise no key events arrive.
 
 import "./os/node-compat.js"; // must load before node-global-key-listener (see file)
-import { fileURLToPath } from "node:url";
 import { run, turnOff } from "./index.js";
-import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform } from "./domain.js";
-import { buildDaemonDeps, stampedConsoleLogger, type Deps } from "./interfaces.js";
+import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform } from "./domain/daemon.js";
+import { startKeyListener } from "./os/key-listener.js";
+import { onWake } from "./os/wake-watch.js";
+import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
+import { log, logError, useTimestamps } from "./log.js";
 
 const isMac = process.platform === "darwin";
 const PLATFORM: Platform = isMac ? "mac" : "other";
@@ -32,52 +34,48 @@ const OFF_TO_SLEEP_MS = 2000;
  */
 const COOLDOWN_MS = 2000;
 
-/**
- * Wire up the daemon over the given dependencies. Returns a stop function. Exported (and
- * deps-injected) so the trigger gating, hotkey dispatch, and boot/wake logic can be tested
- * with fakes — no real keyboard, timers, or TV calls.
- */
-export async function runDaemon(deps: Deps): Promise<() => void> {
-  const log = (m: string) => deps.logger.info(m);
-  const err = (m: string) => deps.logger.error(m);
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function main(): Promise<void> {
+  useTimestamps();
   const gate = new TriggerGate(COOLDOWN_MS);
 
   /** Wake the TV and switch it to the PC input (Cmd/Ctrl + E). */
   async function triggerOn(): Promise<void> {
-    if (!gate.tryAcquire(deps.clock.now())) {
+    if (!gate.tryAcquire(Date.now())) {
       log(`${ON_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
       return;
     }
     log(`\n${ON_COMBO_LABEL} → waking TV and switching to PC...`);
     try {
-      await run(undefined, deps);
+      await run();
     } catch (e) {
-      err(`failed: ${e instanceof Error ? e.message : String(e)}`);
+      logError(`failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      gate.release(deps.clock.now());
+      gate.release(Date.now());
     }
   }
 
   /** Turn the TV off, wait 2s, then put this PC to sleep (Cmd/Ctrl + Q). */
   async function triggerOffAndSleep(): Promise<void> {
-    if (!gate.tryAcquire(deps.clock.now())) {
+    if (!gate.tryAcquire(Date.now())) {
       log(`${OFF_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
       return;
     }
     log(`\n${OFF_COMBO_LABEL} → turning TV off, then sleeping this PC...`);
     try {
-      await turnOff(deps);
-      await deps.clock.sleep(OFF_TO_SLEEP_MS);
+      await turnOff();
+      await sleep(OFF_TO_SLEEP_MS);
       log("Putting this PC to sleep...");
-      await deps.system.sleepPc();
+      await sleepPc();
     } catch (e) {
-      err(`failed: ${e instanceof Error ? e.message : String(e)}`);
+      logError(`failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      gate.release(deps.clock.now());
+      gate.release(Date.now());
     }
   }
 
-  await deps.keyListener.start((e, mods) => {
+  const stopKeys = await startKeyListener((e, mods) => {
     if (matchHotkey(e, mods, "E", PLATFORM)) void triggerOn();
     else if (matchHotkey(e, mods, "Q", PLATFORM)) void triggerOffAndSleep();
   });
@@ -86,12 +84,12 @@ export async function runDaemon(deps: Deps): Promise<() => void> {
   // item), the PC's wake happened before any tick existed, so the wake watcher can't detect
   // it. Reconcile once: ensure the TV is on and on PC input. uptimeSeconds() is seconds since
   // system boot (not process start), cross-platform.
-  if (isWithinBootWindow(deps.system.uptimeSeconds())) {
+  if (isWithinBootWindow(uptimeSeconds())) {
     log("\nDaemon started near boot → waking TV if it was off...");
     void triggerOn(); // powers on only if off, then switches to PC input
   }
 
-  deps.wakeNotifier.start((sleptMs) => {
+  const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
     log(`\nPC woke from sleep (~${mins} min) → waking TV if it was off...`);
     void triggerOn(); // run() powers on only if off, then switches to PC input
@@ -103,18 +101,9 @@ export async function runDaemon(deps: Deps): Promise<() => void> {
   log("  Auto-wakes the TV when this PC resumes from sleep.");
   log("Press Ctrl+C to quit.");
 
-  return () => {
-    deps.wakeNotifier.stop();
-    deps.keyListener.stop();
-  };
-}
-
-async function main(): Promise<void> {
-  const deps = await buildDaemonDeps({ logger: stampedConsoleLogger });
-  const stop = await runDaemon(deps);
-
   const shutdown = () => {
-    stop();
+    stopWake();
+    stopKeys();
     process.exit(0);
   };
   process.on("SIGINT", shutdown);
@@ -124,11 +113,7 @@ async function main(): Promise<void> {
   process.stdin.resume();
 }
 
-// Only run when this file is the entry point (not when imported by tests).
-const isMain = process.argv[1] === fileURLToPath(import.meta.url);
-if (isMain) {
-  main().catch((err: unknown) => {
-    console.error(`\nDaemon error: ${err instanceof Error ? err.message : String(err)}`);
-    process.exitCode = 1;
-  });
-}
+main().catch((err: unknown) => {
+  console.error(`\nDaemon error: ${err instanceof Error ? err.message : String(err)}`);
+  process.exitCode = 1;
+});

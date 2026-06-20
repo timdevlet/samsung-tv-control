@@ -1,8 +1,7 @@
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "./domain.js";
-import type { ConfigStore } from "./interfaces.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "./domain/config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -10,7 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export const CONFIG_PATH = join(__dirname, "..", "smartthings-config.json");
 
 // Re-export the type from its new home so existing importers keep working.
-export type { TVConfig } from "./domain.js";
+export type { TVConfig } from "./domain/config.js";
 
 export async function loadConfig(): Promise<TVConfig> {
   try {
@@ -39,10 +38,3 @@ export async function resetConfig(): Promise<void> {
 export function resolveToken(config: TVConfig): string | undefined {
   return resolveStaticToken(config, process.env.SMARTTHINGS_TOKEN);
 }
-
-/** Production ConfigStore backed by the JSON file at CONFIG_PATH. */
-export const fileConfigStore: ConfigStore = {
-  load: loadConfig,
-  save: saveConfig,
-  reset: resetConfig,
-};

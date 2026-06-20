@@ -1,26 +1,9 @@
 import { describe, it, expect } from "vitest";
-import {
-  pickInput,
-  isOnInput,
-  parseHdmiFlag,
-  parseStatus,
-  pickTV,
-  mainCapabilities,
-  hasOAuthClient,
-  authorizeUrl,
-  isTokenFresh,
-  applyTokens,
-  mergeConfig,
-  defaultConfig,
-  resolveStaticToken,
-  matchHotkey,
-  isWithinBootWindow,
-  TriggerGate,
-  WakeDetector,
-  EXPIRY_SKEW_MS,
-  type TVStatus,
-  type TVConfig,
-} from "../src/domain.js";
+import { pickInput, isOnInput, parseStatus, pickTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
+import { parseHdmiFlag } from "../src/domain/cli.js";
+import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "../src/domain/config.js";
+import { matchHotkey, isWithinBootWindow, TriggerGate, WakeDetector } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
 

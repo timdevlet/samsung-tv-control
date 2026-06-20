@@ -1,17 +1,14 @@
 import {
-  authorizeUrl,
-  hasOAuthClient,
   isTokenFresh,
   applyTokens,
   DEFAULT_REDIRECT_URI,
-  DEFAULT_SCOPES,
-  type TVConfig,
   type TokenResponse,
-} from "../domain.js";
-import type { OAuthClient, ConfigStore, Clock } from "../interfaces.js";
+} from "../domain/oauth.js";
+import type { TVConfig } from "../domain/config.js";
+import { saveConfig } from "../config.js";
 
 // Pure helpers are re-exported from their new home for existing importers.
-export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "../domain.js";
+export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "../domain/oauth.js";
 
 // SmartThings OAuth 2.0 token endpoint.
 const TOKEN_URL = "https://auth-global.api.smartthings.com/oauth/token";
@@ -55,52 +52,35 @@ async function postToken(config: TVConfig, params: Record<string, string>): Prom
   return json as TokenResponse;
 }
 
-/** Production OAuthClient: talks to the SmartThings token endpoint over HTTP. */
-export const httpOAuthClient: OAuthClient = {
-  exchangeCode(config, code) {
-    return postToken(config, {
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.redirectUri ?? DEFAULT_REDIRECT_URI,
-    });
-  },
-  refresh(config, refreshToken) {
-    return postToken(config, {
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    });
-  },
-};
-
 /** One-time: exchange the browser auth code for tokens and persist them. */
-export async function exchangeCode(
-  config: TVConfig,
-  code: string,
-  deps: { oauth: OAuthClient; config: ConfigStore; clock: Clock },
-): Promise<void> {
-  const tok = await deps.oauth.exchangeCode(config, code);
-  applyTokens(config, tok, deps.clock.now());
-  await deps.config.save(config);
+export async function exchangeCode(config: TVConfig, code: string): Promise<void> {
+  const tok = await postToken(config, {
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: config.redirectUri ?? DEFAULT_REDIRECT_URI,
+  });
+  applyTokens(config, tok, Date.now());
+  await saveConfig(config);
 }
 
 /**
  * Returns a valid access token, transparently refreshing when within the skew window of
- * expiry and persisting the rotated refresh token back to the config store.
+ * expiry and persisting the rotated refresh token back to the config file.
  */
-export async function getAccessToken(
-  config: TVConfig,
-  deps: { oauth: OAuthClient; config: ConfigStore; clock: Clock },
-): Promise<string> {
+export async function getAccessToken(config: TVConfig): Promise<string> {
   if (!config.refreshToken) {
     throw new Error("Not authorized yet — run `npm run login` once to connect your SmartThings account.");
   }
 
-  if (isTokenFresh(config, deps.clock.now())) return config.accessToken!;
+  if (isTokenFresh(config, Date.now())) return config.accessToken!;
 
   try {
-    const tok = await deps.oauth.refresh(config, config.refreshToken);
-    applyTokens(config, tok, deps.clock.now());
-    await deps.config.save(config);
+    const tok = await postToken(config, {
+      grant_type: "refresh_token",
+      refresh_token: config.refreshToken,
+    });
+    applyTokens(config, tok, Date.now());
+    await saveConfig(config);
     return tok.access_token;
   } catch (err) {
     if ((err as Error & { oauthError?: string }).oauthError === "invalid_grant") {

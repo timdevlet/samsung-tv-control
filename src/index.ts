@@ -1,11 +1,15 @@
 import { fileURLToPath } from "node:url";
-import { resolveToken, type TVConfig } from "./config.js";
+import { loadConfig, saveConfig, resetConfig, resolveToken, type TVConfig } from "./config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
-import { pickInput, isOnInput, parseHdmiFlag } from "./domain.js";
-import { buildDeps, type Deps, type TVApi } from "./interfaces.js";
+import { pickInput, isOnInput } from "./domain/tv.js";
+import { parseHdmiFlag } from "./domain/cli.js";
+import { SmartThings } from "./api/smartthings.js";
+import { log } from "./log.js";
 
 /** Time to let the TV settle after a cloud power-on before switching its input. */
 const POWER_ON_SETTLE_MS = 500;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
  * Resolve a usable access token. Precedence:
@@ -13,12 +17,12 @@ const POWER_ON_SETTLE_MS = 500;
  *   2. OAuth auto-refresh, if a client is configured and authorized
  *   3. Legacy static PAT in smartthings-config.json
  */
-export async function resolveAccessToken(config: TVConfig, deps: Deps): Promise<string> {
+export async function resolveAccessToken(config: TVConfig): Promise<string> {
   const envPat = process.env.SMARTTHINGS_TOKEN?.trim();
   if (envPat) return envPat;
 
   if (hasOAuthClient(config) && config.refreshToken) {
-    return getAccessToken(config, deps); // refreshes + persists the rotated token as needed
+    return getAccessToken(config); // refreshes + persists the rotated token as needed
   }
 
   const pat = resolveToken(config);
@@ -34,9 +38,8 @@ export async function resolveAccessToken(config: TVConfig, deps: Deps): Promise<
 }
 
 /** One-time OAuth bootstrap: approve in the browser, paste the code, save tokens. */
-async function login(deps: Deps): Promise<void> {
-  const log = (m: string) => deps.logger.info(m);
-  const config = await deps.config.load();
+async function login(): Promise<void> {
+  const config = await loadConfig();
   if (!hasOAuthClient(config)) {
     throw new Error('Add your OAuth "clientId" and "clientSecret" to smartthings-config.json first.');
   }
@@ -46,17 +49,28 @@ async function login(deps: Deps): Promise<void> {
   log(`2) You'll be redirected to ${config.redirectUri ?? DEFAULT_REDIRECT_URI} with ?code=... in the URL.`);
   log("   Copy the value of the `code` query parameter and paste it below.\n");
 
-  const code = await deps.prompter.question("Paste code: ");
+  const code = await prompt("Paste code: ");
   if (!code) throw new Error("No code entered.");
 
-  await exchangeCode(config, code, deps);
+  await exchangeCode(config, code);
   log("\n✅ Authorized. Tokens saved to smartthings-config.json — they now refresh automatically.");
   log("   Run `npm start` to wake the TV and switch to PC.\n");
 }
 
+/** Read one line from stdin (only used by the one-time login flow). */
+async function prompt(message: string): Promise<string> {
+  const readline = await import("node:readline/promises");
+  const { stdin, stdout } = await import("node:process");
+  const rl = readline.createInterface({ input: stdin, output: stdout });
+  try {
+    return (await rl.question(message)).trim();
+  } finally {
+    rl.close();
+  }
+}
+
 /** Resolve the TV's device id, discovering and caching it on first run. */
-async function resolveDevice(st: TVApi, config: TVConfig, deps: Deps): Promise<string> {
-  const log = (m: string) => deps.logger.info(m);
+async function resolveDevice(st: SmartThings, config: TVConfig): Promise<string> {
   if (config.deviceId) {
     log(`Using cached TV "${config.deviceLabel ?? config.deviceId}".`);
     return config.deviceId;
@@ -70,18 +84,16 @@ async function resolveDevice(st: TVApi, config: TVConfig, deps: Deps): Promise<s
   }
   config.deviceId = tv.deviceId;
   config.deviceLabel = tv.label;
-  await deps.config.save(config);
+  await saveConfig(config);
   log(`Found "${tv.label}".`);
   return tv.deviceId;
 }
 
-export async function run(inputOverride?: string, deps?: Deps): Promise<void> {
-  const d = deps ?? (await buildDeps());
-  const log = (m: string) => d.logger.info(m);
-  const config = await d.config.load();
+export async function run(inputOverride?: string): Promise<void> {
+  const config = await loadConfig();
   if (inputOverride) config.pcInput = inputOverride;
-  const st = d.tvApi(await resolveAccessToken(config, d));
-  const deviceId = await resolveDevice(st, config, d);
+  const st = new SmartThings(await resolveAccessToken(config));
+  const deviceId = await resolveDevice(st, config);
 
   // 1) Check status first; if off, wake it and give it a moment to settle before switching
   // input (a setInputSource sent mid-wake can be dropped). We re-read after waking because the
@@ -90,7 +102,7 @@ export async function run(inputOverride?: string, deps?: Deps): Promise<void> {
   if (status.power !== "on") {
     log("TV is off — turning it on...");
     await st.powerOn(deviceId);
-    await d.clock.sleep(POWER_ON_SETTLE_MS);
+    await sleep(POWER_ON_SETTLE_MS);
     status = await st.getStatus(deviceId);
   } else {
     log("TV is already on.");
@@ -115,12 +127,10 @@ export async function run(inputOverride?: string, deps?: Deps): Promise<void> {
 }
 
 /** Turn the TV off, but only when it's currently on the PC input. */
-export async function turnOff(deps?: Deps): Promise<void> {
-  const d = deps ?? (await buildDeps());
-  const log = (m: string) => d.logger.info(m);
-  const config = await d.config.load();
-  const st = d.tvApi(await resolveAccessToken(config, d));
-  const deviceId = await resolveDevice(st, config, d);
+export async function turnOff(): Promise<void> {
+  const config = await loadConfig();
+  const st = new SmartThings(await resolveAccessToken(config));
+  const deviceId = await resolveDevice(st, config);
   const status = await st.getStatus(deviceId);
 
   if (status.power === "off") {
@@ -140,10 +150,9 @@ export async function turnOff(deps?: Deps): Promise<void> {
 }
 
 /** `--devices`: list account devices with their main capabilities. */
-async function listDevices(deps: Deps): Promise<void> {
-  const log = (m: string) => deps.logger.info(m);
-  const config = await deps.config.load();
-  const st = deps.tvApi(await resolveAccessToken(config, deps));
+async function listDevices(): Promise<void> {
+  const config = await loadConfig();
+  const st = new SmartThings(await resolveAccessToken(config));
   const devices = await st.listDevices();
   if (devices.length === 0) {
     log("No devices found on this SmartThings account.");
@@ -157,22 +166,21 @@ async function listDevices(deps: Deps): Promise<void> {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
-  const deps = await buildDeps();
 
   if (args.includes("--login")) {
-    await login(deps);
+    await login();
     return;
   }
   if (args.includes("--reset")) {
-    await deps.config.reset();
-    deps.logger.info("Cleared smartthings-config.json (cached device id and token).");
+    await resetConfig();
+    log("Cleared smartthings-config.json (cached device id and token).");
     return;
   }
   if (args.includes("--devices")) {
-    await listDevices(deps);
+    await listDevices();
     return;
   }
-  await run(parseHdmiFlag(args), deps);
+  await run(parseHdmiFlag(args));
 }
 
 // Only run the CLI when this file is the entry point — not when imported (e.g. by the daemon).
