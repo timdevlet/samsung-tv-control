@@ -83,9 +83,9 @@ process was frozen (the PC slept). On wake it turns the TV on (only if it was of
 PC, then pauses detection for 5 minutes so it can't re-fire. This works on all platforms — no
 extra setup.
 
-It uses [`node-global-key-listener`](https://www.npmjs.com/package/node-global-key-listener)
-(ships a small helper binary — no Electron). A 1.5s cooldown prevents key auto-repeat
-from double-firing.
+It uses [`uiohook-napi`](https://www.npmjs.com/package/uiohook-napi), which installs a
+system-wide low-level keyboard hook (so on Windows the hotkey fires even when the app
+isn't focused). A 1.5s cooldown prevents key auto-repeat from double-firing.
 
 > **macOS:** global key capture requires **Accessibility** permission. The first run
 > prompts — or grant it manually under **System Settings → Privacy & Security →

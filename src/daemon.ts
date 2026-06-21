@@ -27,6 +27,12 @@ const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
 const OFF_TO_SLEEP_MS = 2000;
 
 /**
+ * On PC wake the network stack hasn't reconnected yet, so the first SmartThings calls can hang
+ * or fail. Retry the whole wake a few times with a growing delay until the network is back.
+ */
+const WAKE_RETRY_DELAYS_MS = [0, 1000, 1000, 1000, 2000];
+
+/**
  * Cooldown after a trigger finishes. A new trigger is ignored while a handler is running or
  * within this window afterwards — so commands fire at most once per ~2s and key auto-repeat /
  * a held combo can't double-fire. Each handler still makes all of its own API calls without
@@ -40,17 +46,31 @@ async function main(): Promise<void> {
   useTimestamps();
   const gate = new TriggerGate(COOLDOWN_MS);
 
-  /** Wake the TV and switch it to the PC input (Cmd/Ctrl + E). */
-  async function triggerOn(): Promise<void> {
+  /**
+   * Wake the TV and switch it to the PC input (Cmd/Ctrl + E).
+   *
+   * `retryDelaysMs` retries the whole run() on failure with the given delays before each attempt
+   * — used on PC wake, where the network may not be reconnected yet. Default: a single attempt.
+   */
+  async function triggerOn(retryDelaysMs: number[] = [0]): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${ON_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
       return;
     }
     log(`\n${ON_COMBO_LABEL} → waking TV and switching to PC...`);
     try {
-      await run();
-    } catch (e) {
-      logError(`failed: ${e instanceof Error ? e.message : String(e)}`);
+      for (let i = 0; i < retryDelaysMs.length; i++) {
+        if (retryDelaysMs[i] > 0) await sleep(retryDelaysMs[i]);
+        try {
+          await run();
+          return; // succeeded
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          const last = i === retryDelaysMs.length - 1;
+          if (last) logError(`failed after ${retryDelaysMs.length} attempt(s): ${msg}`);
+          else log(`attempt ${i + 1}/${retryDelaysMs.length} failed (${msg}) — retrying...`);
+        }
+      }
     } finally {
       gate.release(Date.now());
     }
@@ -86,13 +106,13 @@ async function main(): Promise<void> {
   // system boot (not process start), cross-platform.
   if (isWithinBootWindow(uptimeSeconds())) {
     log("\nDaemon started near boot → waking TV if it was off...");
-    void triggerOn(); // powers on only if off, then switches to PC input
+    void triggerOn(WAKE_RETRY_DELAYS_MS); // network may still be coming up at boot
   }
 
   const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
     log(`\nPC woke from sleep (~${mins} min) → waking TV if it was off...`);
-    void triggerOn(); // run() powers on only if off, then switches to PC input
+    void triggerOn(WAKE_RETRY_DELAYS_MS); // network reconnect lags the wake — retry until it's up
   });
 
   log("TV daemon running.");

@@ -4,12 +4,33 @@ import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_RED
 import { pickInput, isOnInput } from "./domain/tv.js";
 import { parseHdmiFlag } from "./domain/cli.js";
 import { SmartThings } from "./api/smartthings.js";
+import type { TVStatus } from "./domain/tv.js";
 import { log } from "./log.js";
 
-/** Time to let the TV settle after a cloud power-on before switching its input. */
-const POWER_ON_SETTLE_MS = 500;
+/** Time to let the TV settle after a cloud power-on before re-reading its status. */
+const POWER_ON_SETTLE_MS = 2000;
+/** How many times to (re)send switch:on and re-check before giving up. */
+const POWER_ON_ATTEMPTS = 4;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Power the TV on and confirm it actually reports `on`. A single cloud switch:on can be
+ * dropped (the TV's WiFi is still waking, or the command lands mid-transition), so we resend
+ * and re-read up to POWER_ON_ATTEMPTS times. Returns the latest status. If the TV never reports
+ * `on` we still return — the caller logs and the input switch is attempted regardless.
+ */
+async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus): Promise<TVStatus> {
+  for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
+    log(`TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
+    await st.powerOn(deviceId);
+    await sleep(POWER_ON_SETTLE_MS);
+    status = await st.getStatus(deviceId);
+  }
+  if (status.power === "on") log("TV is on.");
+  else log("TV still reports off after retries — it may be unreachable by the cloud (deep standby).");
+  return status;
+}
 
 /**
  * Resolve a usable access token. Precedence:
@@ -99,14 +120,7 @@ export async function run(inputOverride?: string): Promise<void> {
   // input (a setInputSource sent mid-wake can be dropped). We re-read after waking because the
   // off-state status often doesn't include the input-source map.
   let status = await st.getStatus(deviceId);
-  if (status.power !== "on") {
-    log("TV is off — turning it on...");
-    await st.powerOn(deviceId);
-    await sleep(POWER_ON_SETTLE_MS);
-    status = await st.getStatus(deviceId);
-  } else {
-    log("TV is already on.");
-  }
+  status = await ensurePoweredOn(st, deviceId, status);
 
   // 2) Switch the input to the PC, skipping when it's already on the target.
   const capability = status.inputCapability;
