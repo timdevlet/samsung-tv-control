@@ -52,7 +52,7 @@ async function postToken(config: TVConfig, params: Record<string, string>): Prom
   return json as TokenResponse;
 }
 
-/** One-time: exchange the browser auth code for tokens and persist them. */
+// One-time: exchange the browser auth code for tokens and persist them.
 export async function exchangeCode(config: TVConfig, code: string): Promise<void> {
   const tok = await postToken(config, {
     grant_type: "authorization_code",
@@ -63,10 +63,8 @@ export async function exchangeCode(config: TVConfig, code: string): Promise<void
   await saveConfig(config);
 }
 
-/**
- * Returns a valid access token, transparently refreshing when within the skew window of
- * expiry and persisting the rotated refresh token back to the config file.
- */
+// Returns a valid access token, transparently refreshing when within the skew window of
+// expiry and persisting the rotated refresh token back to the config file.
 export async function getAccessToken(config: TVConfig): Promise<string> {
   if (!config.refreshToken) {
     throw new Error("Not authorized yet — run `npm run login` once to connect your SmartThings account.");

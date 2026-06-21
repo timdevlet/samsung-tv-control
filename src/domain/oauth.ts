@@ -6,10 +6,10 @@ export const DEFAULT_REDIRECT_URI = "https://httpbin.org/get";
 export const DEFAULT_SCOPES = "r:devices:* x:devices:* r:locations:*";
 const AUTHORIZE_URL = "https://api.smartthings.com/oauth/authorize";
 
-/** Refresh this many ms before the access token's real 24h expiry. */
+// Refresh this many ms before the access token's real 24h expiry.
 export const EXPIRY_SKEW_MS = 5 * 60 * 1000;
 
-/** Shape of the SmartThings OAuth token endpoint response (the parts we read). */
+// Shape of the SmartThings OAuth token endpoint response (the parts we read).
 export interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -18,12 +18,12 @@ export interface TokenResponse {
   token_type?: string;
 }
 
-/** True once an OAuth client (clientId + clientSecret) is configured. */
+// True once an OAuth client (clientId + clientSecret) is configured.
 export function hasOAuthClient(config: TVConfig): boolean {
   return Boolean(config.clientId && config.clientSecret);
 }
 
-/** Browser URL the user opens once to approve access. */
+// Browser URL the user opens once to approve access.
 export function authorizeUrl(config: TVConfig): string {
   const u = new URL(AUTHORIZE_URL);
   u.searchParams.set("client_id", config.clientId ?? "");
@@ -33,7 +33,7 @@ export function authorizeUrl(config: TVConfig): string {
   return u.toString();
 }
 
-/** True when the cached access token is present and not within the skew window of expiry. */
+// True when the cached access token is present and not within the skew window of expiry.
 export function isTokenFresh(config: TVConfig, now: number): boolean {
   return (
     config.accessToken != null &&
@@ -42,7 +42,7 @@ export function isTokenFresh(config: TVConfig, now: number): boolean {
   );
 }
 
-/** Apply a token response onto the config (mutates). `now` is epoch ms. */
+// Apply a token response onto the config (mutates). `now` is epoch ms.
 export function applyTokens(config: TVConfig, tok: TokenResponse, now: number): void {
   config.accessToken = tok.access_token;
   config.refreshToken = tok.refresh_token; // rotated value — must overwrite the old one

@@ -5,7 +5,7 @@ import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from ".
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/** Persisted next to the project root so it survives across runs. */
+// Persisted next to the project root so it survives across runs.
 export const CONFIG_PATH = join(__dirname, "..", "smartthings-config.json");
 
 // Re-export the type from its new home so existing importers keep working.
@@ -34,7 +34,7 @@ export async function resetConfig(): Promise<void> {
   }
 }
 
-/** Token from the environment takes precedence over the config file. */
+// Token from the environment takes precedence over the config file.
 export function resolveToken(config: TVConfig): string | undefined {
   return resolveStaticToken(config, process.env.SMARTTHINGS_TOKEN);
 }

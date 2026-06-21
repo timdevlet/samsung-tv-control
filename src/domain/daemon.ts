@@ -2,7 +2,7 @@
 // state machines for trigger cooldown and sleep/wake detection. No I/O; the daemon (src/
 // daemon.ts) and os/ adapters drive these with real timers and a real clock.
 
-// --- Hotkey matching ---
+// Hotkey matching
 
 export type Platform = "mac" | "other";
 
@@ -16,53 +16,49 @@ export interface ModifierState {
   meta: boolean;
 }
 
-/** True when the configured modifiers are held and `key` is the key going down. */
+// True when the configured modifiers are held and `key` is the key going down.
 export function matchHotkey(e: KeyEvent, mods: ModifierState, key: string, platform: Platform): boolean {
   if (e.state !== "DOWN" || e.name !== key) return false;
   return platform === "mac" ? mods.meta && mods.ctrl : mods.ctrl && mods.alt;
 }
 
-// --- Boot window ---
+// Boot window
 
-/** True if the system booted within `windowSeconds` (i.e. the daemon started near boot). */
+// True if the system booted within `windowSeconds` (i.e. the daemon started near boot).
 export function isWithinBootWindow(uptimeSeconds: number, windowSeconds = 120): boolean {
   return uptimeSeconds < windowSeconds;
 }
 
-// --- Trigger cooldown gate (timer-free state machine) ---
+// Trigger cooldown gate (timer-free state machine)
 
-/**
- * Serializes triggers: a new trigger is rejected while one is running (busy) or within
- * `cooldownMs` after the last one settled. Equivalent to the old `busy` flag + setTimeout,
- * but holds no timer — callers pass the current time in.
- */
+// Serializes triggers: a new trigger is rejected while one is running (busy) or within
+// `cooldownMs` after the last one settled. Equivalent to the old `busy` flag + setTimeout,
+// but holds no timer — callers pass the current time in.
 export class TriggerGate {
   private busy = false;
   private cooldownUntil = 0;
 
   constructor(private readonly cooldownMs: number) {}
 
-  /** Returns true and marks busy if a trigger may start at `now`; false otherwise. */
+  // Returns true and marks busy if a trigger may start at `now`; false otherwise.
   tryAcquire(now: number): boolean {
     if (this.busy || now < this.cooldownUntil) return false;
     this.busy = true;
     return true;
   }
 
-  /** Call when a handler settles; opens a cooldown window of `cooldownMs` from `now`. */
+  // Call when a handler settles; opens a cooldown window of `cooldownMs` from `now`.
   release(now: number): void {
     this.busy = false;
     this.cooldownUntil = now + this.cooldownMs;
   }
 }
 
-// --- Wake detection (timer-free state machine) ---
+// Wake detection (timer-free state machine)
 
-/**
- * Detects a sleep/wake gap from heartbeat ticks. Feed each tick's timestamp; a gap of at
- * least `gapMs` since the previous tick (outside the pause window) means the PC slept and
- * woke. After firing, detection is paused for `pauseMs`.
- */
+// Detects a sleep/wake gap from heartbeat ticks. Feed each tick's timestamp; a gap of at
+// least `gapMs` since the previous tick (outside the pause window) means the PC slept and
+// woke. After firing, detection is paused for `pauseMs`.
 export class WakeDetector {
   private last: number;
   private pausedUntil = 0;
@@ -75,7 +71,7 @@ export class WakeDetector {
     this.last = startNow;
   }
 
-  /** Returns the approximate sleep duration (ms) if a wake is detected at `now`, else null. */
+  // Returns the approximate sleep duration (ms) if a wake is detected at `now`, else null.
   tick(now: number): number | null {
     const gap = now - this.last;
     this.last = now;

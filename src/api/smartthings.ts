@@ -6,7 +6,7 @@ const BASE = "https://api.smartthings.com/v1";
 // Re-export the shapes from their new home so existing importers keep working.
 export type { STDevice, InputSource, TVStatus } from "../domain/tv.js";
 
-/** Minimal SmartThings REST client (cloud control — no LAN access needed). */
+// Minimal SmartThings REST client (cloud control — no LAN access needed).
 export class SmartThings {
   constructor(private readonly token: string) {}
 
@@ -34,7 +34,7 @@ export class SmartThings {
     return (await res.json()) as T;
   }
 
-  /** All devices on the account, flattened to id/label/name + main-component capabilities. */
+  // All devices on the account, flattened to id/label/name + main-component capabilities.
   async listDevices(): Promise<STDevice[]> {
     const data = await this.req<{ items: RawDevice[] }>("/devices");
     return (data.items ?? []).map((d) => ({
@@ -45,12 +45,12 @@ export class SmartThings {
     }));
   }
 
-  /** Pick the most likely TV: a device whose main component can switch inputs. */
+  // Pick the most likely TV: a device whose main component can switch inputs.
   async findTV(): Promise<STDevice | null> {
     return pickTV(await this.listDevices());
   }
 
-  /** Read power state, the input capability in use, current input, and the source list. */
+  // Read power state, the input capability in use, current input, and the source list.
   async getStatus(deviceId: string): Promise<TVStatus> {
     const data = await this.req<RawStatus>(`/devices/${deviceId}/status`);
     return parseStatus(data);

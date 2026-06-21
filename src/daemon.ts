@@ -10,7 +10,6 @@
 // will prompt (or grant it under System Settings → Privacy & Security →
 // Accessibility for your terminal app), otherwise no key events arrive.
 
-import "./os/node-compat.js"; // must load before node-global-key-listener (see file)
 import { run, turnOff } from "./index.js";
 import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform } from "./domain/daemon.js";
 import { startKeyListener } from "./os/key-listener.js";
@@ -23,21 +22,17 @@ const PLATFORM: Platform = isMac ? "mac" : "other";
 const ON_COMBO_LABEL = isMac ? "Cmd+Ctrl+E" : "Ctrl+Alt+E";
 const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
 
-/** Delay between turning the TV off and putting the PC to sleep. */
+// Delay between turning the TV off and putting the PC to sleep.
 const OFF_TO_SLEEP_MS = 2000;
 
-/**
- * On PC wake the network stack hasn't reconnected yet, so the first SmartThings calls can hang
- * or fail. Retry the whole wake a few times with a growing delay until the network is back.
- */
+// On PC wake the network stack hasn't reconnected yet, so the first SmartThings calls can hang
+// or fail. Retry the whole wake a few times with a growing delay until the network is back.
 const WAKE_RETRY_DELAYS_MS = [0, 1000, 1000, 1000, 2000];
 
-/**
- * Cooldown after a trigger finishes. A new trigger is ignored while a handler is running or
- * within this window afterwards — so commands fire at most once per ~2s and key auto-repeat /
- * a held combo can't double-fire. Each handler still makes all of its own API calls without
- * delay; only re-triggering is rate-limited.
- */
+// Cooldown after a trigger finishes. A new trigger is ignored while a handler is running or
+// within this window afterwards — so commands fire at most once per ~2s and key auto-repeat /
+// a held combo can't double-fire. Each handler still makes all of its own API calls without
+// delay; only re-triggering is rate-limited.
 const COOLDOWN_MS = 2000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -46,12 +41,10 @@ async function main(): Promise<void> {
   useTimestamps();
   const gate = new TriggerGate(COOLDOWN_MS);
 
-  /**
-   * Wake the TV and switch it to the PC input (Cmd/Ctrl + E).
-   *
-   * `retryDelaysMs` retries the whole run() on failure with the given delays before each attempt
-   * — used on PC wake, where the network may not be reconnected yet. Default: a single attempt.
-   */
+  // Wake the TV and switch it to the PC input (Cmd/Ctrl + E).
+  //
+  // `retryDelaysMs` retries the whole run() on failure with the given delays before each attempt
+  // — used on PC wake, where the network may not be reconnected yet. Default: a single attempt.
   async function triggerOn(retryDelaysMs: number[] = [0]): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${ON_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
@@ -76,7 +69,7 @@ async function main(): Promise<void> {
     }
   }
 
-  /** Turn the TV off, wait 2s, then put this PC to sleep (Cmd/Ctrl + Q). */
+  // Turn the TV off, wait 2s, then put this PC to sleep (Cmd/Ctrl + Q).
   async function triggerOffAndSleep(): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${OFF_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);

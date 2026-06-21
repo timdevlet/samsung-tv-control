@@ -7,19 +7,17 @@ import { SmartThings } from "./api/smartthings.js";
 import type { TVStatus } from "./domain/tv.js";
 import { log } from "./log.js";
 
-/** Time to let the TV settle after a cloud power-on before re-reading its status. */
+// Time to let the TV settle after a cloud power-on before re-reading its status.
 const POWER_ON_SETTLE_MS = 2000;
-/** How many times to (re)send switch:on and re-check before giving up. */
+// How many times to (re)send switch:on and re-check before giving up.
 const POWER_ON_ATTEMPTS = 4;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/**
- * Power the TV on and confirm it actually reports `on`. A single cloud switch:on can be
- * dropped (the TV's WiFi is still waking, or the command lands mid-transition), so we resend
- * and re-read up to POWER_ON_ATTEMPTS times. Returns the latest status. If the TV never reports
- * `on` we still return — the caller logs and the input switch is attempted regardless.
- */
+// Power the TV on and confirm it actually reports `on`. A single cloud switch:on can be
+// dropped (the TV's WiFi is still waking, or the command lands mid-transition), so we resend
+// and re-read up to POWER_ON_ATTEMPTS times. Returns the latest status. If the TV never reports
+// `on` we still return — the caller logs and the input switch is attempted regardless.
 async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus): Promise<TVStatus> {
   for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
     log(`TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
@@ -32,12 +30,10 @@ async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStat
   return status;
 }
 
-/**
- * Resolve a usable access token. Precedence:
- *   1. SMARTTHINGS_TOKEN env var (explicit manual override, handy for testing)
- *   2. OAuth auto-refresh, if a client is configured and authorized
- *   3. Legacy static PAT in smartthings-config.json
- */
+// Resolve a usable access token. Precedence:
+//   1. SMARTTHINGS_TOKEN env var (explicit manual override, handy for testing)
+//   2. OAuth auto-refresh, if a client is configured and authorized
+//   3. Legacy static PAT in smartthings-config.json
 export async function resolveAccessToken(config: TVConfig): Promise<string> {
   const envPat = process.env.SMARTTHINGS_TOKEN?.trim();
   if (envPat) return envPat;
@@ -58,7 +54,7 @@ export async function resolveAccessToken(config: TVConfig): Promise<string> {
   );
 }
 
-/** One-time OAuth bootstrap: approve in the browser, paste the code, save tokens. */
+// One-time OAuth bootstrap: approve in the browser, paste the code, save tokens.
 async function login(): Promise<void> {
   const config = await loadConfig();
   if (!hasOAuthClient(config)) {
@@ -78,7 +74,7 @@ async function login(): Promise<void> {
   log("   Run `npm start` to wake the TV and switch to PC.\n");
 }
 
-/** Read one line from stdin (only used by the one-time login flow). */
+// Read one line from stdin (only used by the one-time login flow).
 async function prompt(message: string): Promise<string> {
   const readline = await import("node:readline/promises");
   const { stdin, stdout } = await import("node:process");
@@ -90,7 +86,7 @@ async function prompt(message: string): Promise<string> {
   }
 }
 
-/** Resolve the TV's device id, discovering and caching it on first run. */
+// Resolve the TV's device id, discovering and caching it on first run.
 async function resolveDevice(st: SmartThings, config: TVConfig): Promise<string> {
   if (config.deviceId) {
     log(`Using cached TV "${config.deviceLabel ?? config.deviceId}".`);
@@ -140,7 +136,7 @@ export async function run(inputOverride?: string): Promise<void> {
   log("Done — TV is on and switched to PC.");
 }
 
-/** Turn the TV off, but only when it's currently on the PC input. */
+// Turn the TV off, but only when it's currently on the PC input.
 export async function turnOff(): Promise<void> {
   const config = await loadConfig();
   const st = new SmartThings(await resolveAccessToken(config));
@@ -163,7 +159,7 @@ export async function turnOff(): Promise<void> {
   log("Done — TV turned off.");
 }
 
-/** `--devices`: list account devices with their main capabilities. */
+// `--devices`: list account devices with their main capabilities.
 async function listDevices(): Promise<void> {
   const config = await loadConfig();
   const st = new SmartThings(await resolveAccessToken(config));

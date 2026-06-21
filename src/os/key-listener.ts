@@ -24,10 +24,8 @@ function toModifiers(e: UiohookKeyboardEvent): ModifierState {
   return { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey };
 }
 
-/**
- * Start listening for global key events, mapped to neutral domain shapes. Returns a stop
- * function. Backed by uiohook-napi (system-wide low-level keyboard hook).
- */
+// Start listening for global key events, mapped to neutral domain shapes. Returns a stop
+// function. Backed by uiohook-napi (system-wide low-level keyboard hook).
 export async function startKeyListener(
   onKey: (e: KeyEvent, mods: ModifierState) => void,
 ): Promise<() => void> {

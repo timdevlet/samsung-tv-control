@@ -11,12 +11,12 @@
 import { WakeDetector } from "../domain/daemon.js";
 
 const TICK_MS = 3000;
-/** A tick this far (or more) past the previous one means the loop was frozen → the PC slept. */
+// A tick this far (or more) past the previous one means the loop was frozen → the PC slept.
 const WAKE_GAP_MS = 10_000;
-/** After firing onResume, ignore further wake detections for this long. */
+// After firing onResume, ignore further wake detections for this long.
 const PAUSE_MS = 5 * 60_000;
 
-/** Call `onResume(sleptMs)` whenever the PC resumes from sleep. Returns a stop function. */
+// Call `onResume(sleptMs)` whenever the PC resumes from sleep. Returns a stop function.
 export function onWake(onResume: (sleptMs: number) => void): () => void {
   const detector = new WakeDetector(WAKE_GAP_MS, PAUSE_MS, Date.now());
   const handle = setInterval(() => {

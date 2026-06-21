@@ -1,6 +1,6 @@
 // Pure CLI argument parsing — no I/O.
 
-/** Parse `--hdmi <n>`, `--hdmi=n`, or `--hdmiN` (n = 1..4) into "HDMI<n>". */
+// Parse `--hdmi <n>`, `--hdmi=n`, or `--hdmiN` (n = 1..4) into "HDMI<n>".
 export function parseHdmiFlag(args: string[]): string | undefined {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];

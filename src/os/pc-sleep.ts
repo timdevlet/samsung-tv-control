@@ -19,7 +19,7 @@ function suspendCommand(): { cmd: string; args: string[] } {
   }
 }
 
-/** Trigger OS sleep/suspend. Resolves once the command exits 0; rejects otherwise. */
+// Trigger OS sleep/suspend. Resolves once the command exits 0; rejects otherwise.
 export function sleepPc(): Promise<void> {
   const { cmd, args } = suspendCommand();
   return new Promise<void>((resolve, reject) => {
@@ -37,7 +37,7 @@ export function sleepPc(): Promise<void> {
   });
 }
 
-/** Seconds since system boot (not process start), cross-platform. */
+// Seconds since system boot (not process start), cross-platform.
 export function uptimeSeconds(): number {
   return os.uptime();
 }
