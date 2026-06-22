@@ -1,5 +1,6 @@
 import { parseStatus, mainCapabilities, pickTV } from "../domain/tv.js";
 import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain/tv.js";
+import { log } from "../log.js";
 
 const BASE = "https://api.smartthings.com/v1";
 
@@ -8,6 +9,7 @@ export class SmartThings {
   constructor(private readonly token: string) {}
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
+    const method = init?.method ?? "GET";
     const res = await fetch(`${BASE}${path}`, {
       ...init,
       headers: {
@@ -17,8 +19,11 @@ export class SmartThings {
       },
       signal: AbortSignal.timeout(15_000),
     });
+    // Always log the API response. We read the body as text once and reuse it both for logging
+    // and parsing, since a Response body can only be consumed a single time.
+    const body = await res.text().catch(() => "");
+    log(`SmartThings API ${method} ${path} → ${res.status} ${body || "(empty)"}`);
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
       if (res.status === 401) {
         throw new Error(
           "SmartThings rejected the token (401). It may be invalid or expired — " +
@@ -27,8 +32,8 @@ export class SmartThings {
       }
       throw new Error(`SmartThings API ${res.status} on ${path}: ${body.slice(0, 300)}`);
     }
-    if (res.status === 204) return undefined as T;
-    return (await res.json()) as T;
+    if (res.status === 204 || body === "") return undefined as T;
+    return JSON.parse(body) as T;
   }
 
   // All devices on the account, flattened to id/label/name + main-component capabilities.

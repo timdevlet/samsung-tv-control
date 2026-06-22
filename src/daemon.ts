@@ -26,8 +26,8 @@ const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
 const OFF_TO_SLEEP_MS = 2000;
 
 // On PC wake the network stack hasn't reconnected yet, so the first SmartThings calls can hang
-// or fail. Retry the whole wake a few times with a growing delay until the network is back.
-const WAKE_RETRY_DELAYS_MS = [0, 1000, 1000, 1000, 2000];
+// or fail. Retry the whole wake up to 5 times, waiting 3s before each attempt, until it succeeds.
+const WAKE_RETRY_DELAYS_MS = [3000, 3000, 3000, 3000, 3000];
 
 // Cooldown after a trigger finishes. A new trigger is ignored while a handler is running or
 // within this window afterwards — so commands fire at most once per ~2s and key auto-repeat /
