@@ -9,11 +9,11 @@
     "url": "git+https://github.com/timdevlet/samsung-tv-control.git"
   },
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "tsx src/cli.ts",
     "daemon": "tsx src/daemon.ts",
-    "login": "tsx src/index.ts --login",
-    "devices": "tsx src/index.ts --devices",
-    "reset": "tsx src/index.ts --reset",
+    "login": "tsx src/cli.ts --login",
+    "devices": "tsx src/cli.ts --devices",
+    "reset": "tsx src/cli.ts --reset",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"

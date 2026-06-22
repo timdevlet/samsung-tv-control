@@ -3,9 +3,6 @@ import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain/tv.js";
 
 const BASE = "https://api.smartthings.com/v1";
 
-// Re-export the shapes from their new home so existing importers keep working.
-export type { STDevice, InputSource, TVStatus } from "../domain/tv.js";
-
 // Minimal SmartThings REST client (cloud control — no LAN access needed).
 export class SmartThings {
   constructor(private readonly token: string) {}

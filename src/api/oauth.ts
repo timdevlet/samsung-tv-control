@@ -8,7 +8,7 @@ import type { TVConfig } from "../domain/config.js";
 import { saveConfig } from "../config.js";
 
 // Pure helpers are re-exported from their new home for existing importers.
-export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI, DEFAULT_SCOPES } from "../domain/oauth.js";
+export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI } from "../domain/oauth.js";
 
 // SmartThings OAuth 2.0 token endpoint.
 const TOKEN_URL = "https://auth-global.api.smartthings.com/oauth/token";

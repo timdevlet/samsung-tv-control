@@ -10,8 +10,8 @@
 // will prompt (or grant it under System Settings → Privacy & Security →
 // Accessibility for your terminal app), otherwise no key events arrive.
 
-import { run, turnOff } from "./index.js";
-import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform } from "./domain/daemon.js";
+import { createApp } from "./app.js";
+import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform, type KeyEvent, type ModifierState } from "./domain/daemon.js";
 import { startKeyListener } from "./os/key-listener.js";
 import { onWake } from "./os/wake-watch.js";
 import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
@@ -39,11 +39,12 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 async function main(): Promise<void> {
   useTimestamps();
+  const app = createApp();
   const gate = new TriggerGate(COOLDOWN_MS);
 
   // Wake the TV and switch it to the PC input (Cmd/Ctrl + E).
   //
-  // `retryDelaysMs` retries the whole run() on failure with the given delays before each attempt
+  // `retryDelaysMs` retries the whole app.switch() on failure with the given delays before each attempt
   // — used on PC wake, where the network may not be reconnected yet. Default: a single attempt.
   async function triggerOn(retryDelaysMs: number[] = [0]): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
@@ -55,7 +56,7 @@ async function main(): Promise<void> {
       for (let i = 0; i < retryDelaysMs.length; i++) {
         if (retryDelaysMs[i] > 0) await sleep(retryDelaysMs[i]);
         try {
-          await run();
+          await app.switch();
           return; // succeeded
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -77,7 +78,7 @@ async function main(): Promise<void> {
     }
     log(`\n${OFF_COMBO_LABEL} → turning TV off, then sleeping this PC...`);
     try {
-      await turnOff();
+      await app.off();
       await sleep(OFF_TO_SLEEP_MS);
       log("Putting this PC to sleep...");
       await sleepPc();
@@ -88,10 +89,24 @@ async function main(): Promise<void> {
     }
   }
 
-  const stopKeys = await startKeyListener((e, mods) => {
+  const handleKey = (e: KeyEvent, mods: ModifierState) => {
     if (matchHotkey(e, mods, "E", PLATFORM)) void triggerOn();
     else if (matchHotkey(e, mods, "Q", PLATFORM)) void triggerOffAndSleep();
-  });
+  };
+
+  // macOS disables the low-level keyboard tap when the machine sleeps and never re-arms it on
+  // wake, so the hotkeys go silent after a sleep/wake cycle. Tear the listener down and start a
+  // fresh one to re-create the tap. Kept as a mutable ref so the shutdown handler always stops
+  // the live listener.
+  let stopKeys = await startKeyListener(handleKey);
+  async function rearmKeys(): Promise<void> {
+    try {
+      stopKeys();
+    } catch (e) {
+      logError(`failed to stop key listener before re-arm: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    stopKeys = await startKeyListener(handleKey);
+  }
 
   // If the daemon started right after the machine powered on (e.g. launched as a boot/login
   // item), the PC's wake happened before any tick existed, so the wake watcher can't detect
@@ -104,7 +119,8 @@ async function main(): Promise<void> {
 
   const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
-    log(`\nPC woke from sleep (~${mins} min) → waking TV if it was off...`);
+    log(`\nPC woke from sleep (~${mins} min) → re-arming hotkeys and waking TV if it was off...`);
+    void rearmKeys(); // the keyboard tap is disabled across sleep on macOS — re-create it
     void triggerOn(WAKE_RETRY_DELAYS_MS); // network reconnect lags the wake — retry until it's up
   });
 
