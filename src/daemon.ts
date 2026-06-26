@@ -4,14 +4,14 @@
 //   Wake TV + switch to PC      macOS -> Cmd+Ctrl+E    Win/Linux -> Ctrl+Alt+E
 //   Turn TV off + sleep this PC macOS -> Cmd+Ctrl+Q    Win/Linux -> Ctrl+Alt+Q
 //
-// The off+sleep hotkey turns the TV off, waits 2s, then puts this PC to sleep.
+// The off+sleep hotkey turns the TV off, then immediately puts this PC to sleep.
 //
 // macOS note: global key capture needs Accessibility permission. The first run
 // will prompt (or grant it under System Settings → Privacy & Security →
 // Accessibility for your terminal app), otherwise no key events arrive.
 
 import { createApp } from "./app.js";
-import { matchHotkey, isWithinBootWindow, TriggerGate, type Platform, type KeyEvent, type ModifierState } from "./domain/daemon.js";
+import { matchHotkey, isWithinBootWindow, TriggerGate, withRetry, type Platform, type KeyEvent, type ModifierState } from "./domain/daemon.js";
 import { startKeyListener } from "./os/key-listener.js";
 import { onWake } from "./os/wake-watch.js";
 import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
@@ -22,18 +22,17 @@ const PLATFORM: Platform = isMac ? "mac" : "other";
 const ON_COMBO_LABEL = isMac ? "Cmd+Ctrl+E" : "Ctrl+Alt+E";
 const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
 
-// Delay between turning the TV off and putting the PC to sleep.
-const OFF_TO_SLEEP_MS = 2000;
+// No cooldown window: a new trigger may fire the instant the previous handler finishes. The gate
+// still rejects triggers *while* a handler is running, so key auto-repeat / a held combo can't
+// spawn concurrent handlers — but there's no rate-limiting delay afterwards.
+const COOLDOWN_MS = 0;
 
-// On PC wake the network stack hasn't reconnected yet, so the first SmartThings calls can hang
-// or fail. Retry the whole wake up to 5 times, waiting 3s before each attempt, until it succeeds.
-const WAKE_RETRY_DELAYS_MS = [3000, 3000, 3000, 3000, 3000];
-
-// Cooldown after a trigger finishes. A new trigger is ignored while a handler is running or
-// within this window afterwards — so commands fire at most once per ~2s and key auto-repeat /
-// a held combo can't double-fire. Each handler still makes all of its own API calls without
-// delay; only re-triggering is rate-limited.
-const COOLDOWN_MS = 2000;
+// Wake retry: re-run the whole wake operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, when
+// it throws. Covers the network stack not having reconnected yet right after the PC resumes — the
+// token refresh / device lookup inside app.switch() can fail until it's back. A dead TV doesn't
+// throw (app.switch returns after its own power-on retries), so this never stacks a second loop.
+const WAKE_ATTEMPTS = 10;
+const WAKE_RETRY_MS = 3000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -42,44 +41,40 @@ async function main(): Promise<void> {
   const app = createApp();
   const gate = new TriggerGate(COOLDOWN_MS);
 
-  // Wake the TV and switch it to the PC input (Cmd/Ctrl + E).
-  //
-  // `retryDelaysMs` retries the whole app.switch() on failure with the given delays before each attempt
-  // — used on PC wake, where the network may not be reconnected yet. Default: a single attempt.
-  async function triggerOn(retryDelaysMs: number[] = [0]): Promise<void> {
+  // Wake the TV and switch it to the PC input (Cmd/Ctrl + E, on PC wake, and at boot). Retries the
+  // whole operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, on a thrown error — so a network
+  // stack that's still reconnecting right after the PC resumes gets several chances rather than one.
+  async function triggerOn(): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
-      log(`${ON_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
+      log(`${ON_COMBO_LABEL} ignored — a command is still running.`);
       return;
     }
     log(`\n${ON_COMBO_LABEL} → waking TV and switching to PC...`);
     try {
-      for (let i = 0; i < retryDelaysMs.length; i++) {
-        if (retryDelaysMs[i] > 0) await sleep(retryDelaysMs[i]);
-        try {
-          await app.switch();
-          return; // succeeded
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          const last = i === retryDelaysMs.length - 1;
-          if (last) logError(`failed after ${retryDelaysMs.length} attempt(s): ${msg}`);
-          else log(`attempt ${i + 1}/${retryDelaysMs.length} failed (${msg}) — retrying...`);
-        }
-      }
+      await withRetry(
+        () => app.switch(),
+        WAKE_ATTEMPTS,
+        WAKE_RETRY_MS,
+        sleep,
+        (attempt, err) =>
+          log(`attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${WAKE_RETRY_MS / 1000}s...`),
+      );
+    } catch (e) {
+      logError(`failed after ${WAKE_ATTEMPTS} attempts: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       gate.release(Date.now());
     }
   }
 
-  // Turn the TV off, wait 2s, then put this PC to sleep (Cmd/Ctrl + Q).
+  // Turn the TV off, then immediately put this PC to sleep (Cmd/Ctrl + Q).
   async function triggerOffAndSleep(): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
-      log(`${OFF_COMBO_LABEL} ignored — a command is still running (max 1 per ${COOLDOWN_MS}ms).`);
+      log(`${OFF_COMBO_LABEL} ignored — a command is still running.`);
       return;
     }
     log(`\n${OFF_COMBO_LABEL} → turning TV off, then sleeping this PC...`);
     try {
       await app.off();
-      await sleep(OFF_TO_SLEEP_MS);
       log("Putting this PC to sleep...");
       await sleepPc();
     } catch (e) {
@@ -114,14 +109,14 @@ async function main(): Promise<void> {
   // system boot (not process start), cross-platform.
   if (isWithinBootWindow(uptimeSeconds())) {
     log("\nDaemon started near boot → waking TV if it was off...");
-    void triggerOn(WAKE_RETRY_DELAYS_MS); // network may still be coming up at boot
+    void triggerOn();
   }
 
   const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
     log(`\nPC woke from sleep (~${mins} min) → re-arming hotkeys and waking TV if it was off...`);
     void rearmKeys(); // the keyboard tap is disabled across sleep on macOS — re-create it
-    void triggerOn(WAKE_RETRY_DELAYS_MS); // network reconnect lags the wake — retry until it's up
+    void triggerOn();
   });
 
   log("TV daemon running.");

@@ -3,23 +3,19 @@
 // createApp() and call its handlers — neither knows how the SmartThings client or
 // config is constructed. Dependencies are wired per command invocation (each handler
 // reloads config + rebuilds the client), so a long-running daemon picks up token
-// refreshes and the cached device id rather than holding a stale client.
+// refreshes rather than holding a stale client.
 
-import { loadConfig, saveConfig, resolveToken, type TVConfig } from "./config.js";
+import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
 import { pickInput, isOnInput } from "./domain/tv.js";
 import { SmartThings } from "./api/smartthings.js";
 import type { TVStatus } from "./domain/tv.js";
 import { log } from "./log.js";
 
-// How many times to (re)send switch:on before giving up.
-const POWER_ON_ATTEMPTS = 4;
-// While waiting for a just-woken TV to report `on`, re-read its status on this cadence rather
-// than sleeping a fixed amount — so we proceed the instant the TV is ready instead of always
-// paying a worst-case wait. POLLS_PER_ATTEMPT * POLL_INTERVAL_MS bounds how long we wait per
-// switch:on before resending it.
-const POLL_INTERVAL_MS = 300;
-const POLLS_PER_ATTEMPT = 10;
+// Power-on retry loop: (re)send switch:on, wait, re-read status, up to POWER_ON_ATTEMPTS times,
+// pausing POWER_ON_RETRY_MS between attempts. Bounds the wake wait at ~30s (10 × 3s).
+const POWER_ON_ATTEMPTS = 10;
+const POWER_ON_RETRY_MS = 3000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -56,12 +52,8 @@ export function createApp(): App {
     );
   }
 
-  // Resolve the TV's device id, discovering and caching it on first run.
-  async function resolveDevice(st: SmartThings, config: TVConfig): Promise<string> {
-    if (config.deviceId) {
-      log(`Using cached TV "${config.deviceLabel ?? config.deviceId}".`);
-      return config.deviceId;
-    }
+  // Resolve the TV's device id by discovering it fresh on every run (no caching).
+  async function resolveDevice(st: SmartThings): Promise<string> {
     log("Finding the TV in your SmartThings account...");
     const tv = await st.findTV();
     if (!tv) {
@@ -69,9 +61,6 @@ export function createApp(): App {
         "No TV found in SmartThings. Add it in the SmartThings app first, then run `npm run devices` to inspect.",
       );
     }
-    config.deviceId = tv.deviceId;
-    config.deviceLabel = tv.label;
-    await saveConfig(config);
     log(`Found "${tv.label}".`);
     return tv.deviceId;
   }
@@ -81,26 +70,25 @@ export function createApp(): App {
     const config = await loadConfig();
     if (inputOverride) config.pcInput = inputOverride;
     const st = new SmartThings(await resolveAccessToken(config));
-    const deviceId = await resolveDevice(st, config);
+    const deviceId = await resolveDevice(st);
     return { config, st, deviceId };
   }
 
   // Power the TV on and confirm it actually reports `on`. A single cloud switch:on can be
   // dropped (the TV's WiFi is still waking, or the command lands mid-transition), so we resend
-  // up to POWER_ON_ATTEMPTS times. After each send we poll status until the TV reports `on`
-  // (it also only exposes its input-source map once on), returning as soon as it does. If the TV
-  // never reports `on` we still return — the caller logs and the input switch is attempted regardless.
+  // up to POWER_ON_ATTEMPTS times. After each send we wait POWER_ON_RETRY_MS, then re-read status
+  // — the TV needs a moment to come up after waking, and it only exposes its input-source map
+  // once on. We return as soon as it reports `on`. If it never does we still return — the caller
+  // logs and the input switch is attempted regardless.
   async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus): Promise<TVStatus> {
     for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
       log(`TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
       await st.powerOn(deviceId);
-      for (let poll = 0; status.power !== "on" && poll < POLLS_PER_ATTEMPT; poll++) {
-        await sleep(POLL_INTERVAL_MS);
-        status = await st.getStatus(deviceId);
-      }
+      await sleep(POWER_ON_RETRY_MS);
+      status = await st.getStatus(deviceId);
     }
     if (status.power === "on") log("TV is on.");
-    else log("TV still reports off after retries — it may be unreachable by the cloud (deep standby).");
+    else log(`TV still reports off after ${POWER_ON_ATTEMPTS} attempts — it may be unreachable by the cloud (deep standby).`);
     return status;
   }
 
@@ -144,6 +132,12 @@ export function createApp(): App {
     // because the off-state status often doesn't include the input-source map.
     let status = await st.getStatus(deviceId);
     status = await ensurePoweredOn(st, deviceId, status);
+
+    // If the TV never came on after all retries, stop here rather than throwing: there's no
+    // input-source map to switch to, and ensurePoweredOn has already logged the give-up. Throwing
+    // would make the daemon's wake retry pointlessly re-run the whole already-connected operation
+    // (its retry is for transient connect/network failures right after wake, not a dead TV).
+    if (status.power !== "on") return;
 
     // 2) Switch the input to the PC, skipping when it's already on the target.
     const capability = status.inputCapability;

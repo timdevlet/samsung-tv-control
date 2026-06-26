@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   if (args.includes("--devices")) return app.listDevices();
   if (args.includes("--reset")) {
     await resetConfig();
-    log("Cleared smartthings-config.json (cached device id and token).");
+    log("Cleared smartthings-config.json (token and OAuth credentials).");
     return;
   }
   await app.switch(parseHdmiFlag(args));

@@ -29,6 +29,35 @@ export function isWithinBootWindow(uptimeSeconds: number, windowSeconds = 120): 
   return uptimeSeconds < windowSeconds;
 }
 
+// Retry helper
+
+// Run `op` until it resolves without throwing, up to `attempts` times, awaiting `delayMs` (via the
+// injected `sleep`) between tries. Returns once an attempt succeeds; rethrows the last error if
+// every attempt fails. `onRetry` is called before each wait with the failed attempt number and its
+// error. Sleep is injected so the logic is timer-free and unit-testable.
+//
+// Used for the wake/boot TV trigger: right after the PC resumes, the network stack may not have
+// finished reconnecting, so the first app.switch() calls (token refresh, device lookup) can fail
+// until it's back.
+export async function withRetry(
+  op: () => Promise<void>,
+  attempts: number,
+  delayMs: number,
+  sleep: (ms: number) => Promise<void>,
+  onRetry?: (attempt: number, err: unknown) => void,
+): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await op();
+      return;
+    } catch (err) {
+      if (attempt >= attempts) throw err;
+      onRetry?.(attempt, err);
+      await sleep(delayMs);
+    }
+  }
+}
+
 // Trigger cooldown gate (timer-free state machine)
 
 // Serializes triggers: a new trigger is rejected while one is running (busy) or within

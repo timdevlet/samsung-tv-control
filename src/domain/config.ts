@@ -26,12 +26,6 @@ export interface TVConfig {
   // Epoch ms when the access token expires.
   accessTokenExpiresAt?: number;
 
-  // Device cache (filled in automatically on first use)
-  // Cached SmartThings device id of the TV (avoids re-listing every run).
-  deviceId?: string;
-  // Human-readable device label (informational).
-  deviceLabel?: string;
-
   // Your preference
   // Target input the PC is on. Matched against the TV's supported-input map by
   // id ("HDMI3") first, then by label ("PC"). Default "HDMI2".

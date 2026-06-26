@@ -19,10 +19,12 @@ export class SmartThings {
       },
       signal: AbortSignal.timeout(15_000),
     });
-    // Always log the API response. We read the body as text once and reuse it both for logging
-    // and parsing, since a Response body can only be consumed a single time.
+    // Read the body once (a Response can only be consumed a single time) — reused for both logging
+    // and parsing below. Log only the outcome: the HTTP status plus "ok", since a status response
+    // is multiple KB of JSON we don't want dumped on every call. On failure we include a short slice
+    // of the body, which is where the error message lives.
     const body = await res.text().catch(() => "");
-    log(`SmartThings API ${method} ${path} → ${res.status} ${body || "(empty)"}`);
+    log(`SmartThings API ${method} ${path} → ${res.status} ${res.ok ? "ok" : body.slice(0, 200) || "(empty)"}`);
     if (!res.ok) {
       if (res.status === 401) {
         throw new Error(
