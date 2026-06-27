@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Wake a Samsung TV and switch its input to PC via the SmartThings cloud API.",
   "type": "module",
+  "main": "dist-electron/main.cjs",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,15 +17,62 @@
     "reset": "tsx src/cli.ts --reset",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "electron:build": "node scripts/build-electron.mjs",
+    "electron:dev": "npm run electron:build && electron .",
+    "electron:rebuild": "electron-rebuild -f -w uiohook-napi",
+    "dist": "npm run electron:build && electron-builder",
+    "dist:win": "npm run electron:build && electron-builder --win",
+    "dist:dir": "npm run electron:build && electron-builder --dir"
   },
   "dependencies": {
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.0",
     "@types/node": "^22.10.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.24.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9"
+  },
+  "build": {
+    "appId": "com.timdevlet.samsung-tv-control",
+    "productName": "Samsung TV Control",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "node_modules/uiohook-napi/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Samsung TV Control"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "build/icon.png"
+    }
   }
 }

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+    <title>Samsung TV Control</title>
+    <style>
+      :root {
+        --bg: #0d1117;
+        --panel: #161b22;
+        --border: #30363d;
+        --text: #c9d1d9;
+        --muted: #8b949e;
+        --accent: #2563eb;
+        --accent-hover: #3b82f6;
+        --error: #f85149;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        color: var(--text);
+        font: 13px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        flex: none;
+      }
+      header .title { font-weight: 600; margin-right: auto; }
+      header .title small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+      button {
+        font: inherit;
+        color: var(--text);
+        background: #21262d;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      button:hover { background: #30363d; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button.primary:hover { background: var(--accent-hover); }
+      #log {
+        flex: 1;
+        overflow-y: auto;
+        margin: 0;
+        padding: 10px 14px;
+        font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+        font-size: 12.5px;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .line { padding: 1px 0; }
+      .line.error { color: var(--error); }
+      #log:empty::after {
+        content: "Waiting for output…";
+        color: var(--muted);
+      }
+      footer {
+        flex: none;
+        padding: 6px 14px;
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 12px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      footer label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+      .count { margin-left: auto; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <span class="title">Samsung TV Control<small>log</small></span>
+      <button id="wake" class="primary">Wake TV → PC</button>
+      <button id="off">TV off + sleep</button>
+      <button id="clear">Clear</button>
+    </header>
+    <div id="log" role="log" aria-live="polite"></div>
+    <footer>
+      <label><input type="checkbox" id="autoscroll" checked /> Auto-scroll</label>
+      <span class="count" id="count">0 lines</span>
+    </footer>
+
+    <script>
+      const api = window.tvAPI;
+      const logEl = document.getElementById("log");
+      const countEl = document.getElementById("count");
+      const autoscrollEl = document.getElementById("autoscroll");
+      let count = 0;
+
+      function nearBottom() {
+        return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+      }
+
+      function append(entry) {
+        const atBottom = nearBottom();
+        const div = document.createElement("div");
+        div.className = "line" + (entry.level === "error" ? " error" : "");
+        // Render blank-line separators (the daemon prefixes some lines with \n) as real spacing.
+        div.textContent = entry.message.replace(/^\n+/, "");
+        if (/^\n/.test(entry.message)) div.style.marginTop = "8px";
+        logEl.appendChild(div);
+        count++;
+        countEl.textContent = count + (count === 1 ? " line" : " lines");
+        if (autoscrollEl.checked && atBottom) logEl.scrollTop = logEl.scrollHeight;
+      }
+
+      function reset() {
+        logEl.replaceChildren();
+        count = 0;
+        countEl.textContent = "0 lines";
+      }
+
+      (async () => {
+        const history = await api.getHistory();
+        for (const entry of history) append(entry);
+        logEl.scrollTop = logEl.scrollHeight;
+      })();
+
+      api.onLog(append);
+
+      document.getElementById("wake").addEventListener("click", () => api.wakeTv());
+      document.getElementById("off").addEventListener("click", () => api.tvOffSleep());
+      document.getElementById("clear").addEventListener("click", () => {
+        api.clearHistory();
+        reset();
+      });
+    </script>
+  </body>
+</html>

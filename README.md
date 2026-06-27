@@ -62,6 +62,7 @@ npm run daemon         # stay running; trigger on global hotkeys (see below)
 npm run login          # one-time OAuth authorize (auto-refreshing token)
 npm run devices        # list account devices + capabilities (to identify the TV)
 npm run reset          # forget the cached device id / token
+npm run electron:dev   # run the daemon as a desktop tray app with a log window
 ```
 
 ### Daemon + global hotkey
@@ -101,6 +102,53 @@ shorthands `--hdmi=3` and `--hdmi3` also work. Without it, `pcInput` from
 
 First run finds the TV and caches its device id in `smartthings-config.json`, so
 later runs skip the lookup.
+
+## Desktop app (Electron tray + log window)
+
+The same daemon can run as a **Windows desktop app**: it launches, drops to the **system
+tray**, and opens a **window that streams the live log**. Closing the window hides it back to
+the tray (the daemon keeps running); quit from the tray menu to actually exit. The tray menu
+also exposes the two TV actions, and the window has **Wake TV → PC** / **TV off + sleep**
+buttons so you don't need the hotkeys.
+
+It runs the *exact same* daemon core as `npm run daemon` (global hotkeys, sleep/wake auto-wake,
+boot reconcile) — the window only mirrors the log output and adds buttons.
+
+```sh
+npm run electron:dev   # build + launch the app locally (tray + log window)
+npm run dist:win       # build a Windows installer + portable .exe  → release/
+npm run dist:dir       # unpacked build for quick local testing     → release/win-unpacked/
+```
+
+`npm run dist:win` produces, in `release/`:
+
+- **`Samsung TV Control Setup <version>.exe`** — NSIS installer (creates Start-menu / desktop
+  shortcuts; install dir is chooseable).
+- **`Samsung TV Control <version>.exe`** — single-file **portable** exe (no install; just
+  double-click).
+
+### Where the config lives in the packaged app
+
+The CLI/daemon read `smartthings-config.json` from the repo root, but a packaged app's files are
+inside a read-only archive. So the desktop app instead reads/writes:
+
+- **Portable exe:** `smartthings-config.json` **next to the .exe** — drop your authorized config
+  file beside it, or it's created there on first save.
+- **Installer:** `%APPDATA%\Samsung TV Control\smartthings-config.json`.
+
+Either way you can override the location with the `SMARTTHINGS_CONFIG_PATH` env var, or just set
+`SMARTTHINGS_TOKEN`. Authorize once with `npm run login` (in the repo) and copy the resulting
+`smartthings-config.json` to the location above — there's no in-app OAuth UI yet.
+
+### Building the Windows exe
+
+> ⚠️ **`uiohook-napi` is a native module**, so the Windows exe must be built **on Windows**
+> (native addons don't cross-compile from macOS/Linux). Run `npm install` then `npm run dist:win`
+> on a Windows machine (or Windows CI). `electron-builder` rebuilds the addon for Electron's ABI
+> automatically.
+>
+> To run `npm run electron:dev` locally for the first time, rebuild the addon for Electron with
+> `npm run electron:rebuild` (otherwise you'll get a `NODE_MODULE_VERSION` mismatch).
 
 ## Run on Windows startup
 
