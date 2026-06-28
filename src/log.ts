@@ -63,9 +63,15 @@ function colorize(message: string): string {
 
 export type LogLevel = "info" | "error";
 export interface LogEntry {
+  id: number; // monotonic, process-unique — lets the Electron renderer dedupe history vs live
   level: LogLevel;
   message: string; // already formatted (timestamp prefixed when in daemon mode)
 }
+
+// Monotonic counter so every emitted line has a stable identity. The renderer subscribes to live
+// logs and also fetches a history backlog; without an id, lines that appear in both (a line logged
+// in the narrow window around the window opening) would render twice.
+let nextId = 0;
 
 type Listener = (entry: LogEntry) => void;
 const listeners = new Set<Listener>();
@@ -87,11 +93,11 @@ export const log = (msg: string): void => {
   console.log(colorize(message));
   // Listeners (Electron window) get the uncolored line; they highlight it
   // themselves with <span>s — see src/electron/renderer/index.html.
-  emit({ level: "info", message });
+  emit({ id: nextId++, level: "info", message });
 };
 
 export const logError = (msg: string): void => {
   const message = fmt(msg);
   console.error(colorize(message));
-  emit({ level: "error", message });
+  emit({ id: nextId++, level: "error", message });
 };

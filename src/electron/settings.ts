@@ -19,6 +19,11 @@ export interface AppSettings {
   pcInput: string;
   // When true, closing the window hides to the tray; when false, it quits the app.
   minimizeToTrayOnClose: boolean;
+  // Global hotkey for "Wake TV → PC" as an Electron accelerator ("Command+Control+E").
+  // Empty string means no hotkey is bound.
+  wakeHotkey: string;
+  // Global hotkey for "TV Off & Sleep". Empty string means no hotkey is bound.
+  offHotkey: string;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -30,6 +35,8 @@ export async function getSettings(): Promise<AppSettings> {
     pcInput: config.pcInput,
     // Default to the historical behavior (hide to tray) when unset.
     minimizeToTrayOnClose: config.minimizeToTrayOnClose ?? true,
+    wakeHotkey: config.wakeHotkey ?? "",
+    offHotkey: config.offHotkey ?? "",
   };
 }
 
@@ -52,6 +59,14 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   }
   if (typeof partial.minimizeToTrayOnClose === "boolean") {
     config.minimizeToTrayOnClose = partial.minimizeToTrayOnClose;
+  }
+  // Hotkeys differ from the fields above: an empty string is meaningful (it clears
+  // the binding), so we apply the value as-is rather than guarding against blanks.
+  if (typeof partial.wakeHotkey === "string") {
+    config.wakeHotkey = partial.wakeHotkey.trim();
+  }
+  if (typeof partial.offHotkey === "string") {
+    config.offHotkey = partial.offHotkey.trim();
   }
   await saveConfig(config);
 }

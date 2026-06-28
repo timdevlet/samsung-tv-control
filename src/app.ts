@@ -14,7 +14,7 @@ import { log } from "./log.js";
 
 // Power-on retry loop: (re)send switch:on, wait, re-read status, up to POWER_ON_ATTEMPTS times,
 // pausing POWER_ON_RETRY_MS between attempts. Bounds the wake wait at ~30s (10 × 3s).
-const POWER_ON_ATTEMPTS = 10;
+const POWER_ON_ATTEMPTS = 5;
 const POWER_ON_RETRY_MS = 3000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

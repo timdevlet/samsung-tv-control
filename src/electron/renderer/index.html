@@ -24,7 +24,10 @@
         color: var(--text);
         font: 13px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
       }
-      header {
+      /* Universal header — one component, one style, used by the main screen and Settings.
+         Built by renderHeader() below: a title (with optional subtitle), an optional extra
+         slot (e.g. the auth status pill), then a row of buttons. */
+      .app-header {
         display: flex;
         align-items: center;
         gap: 8px;
@@ -33,8 +36,10 @@
         border-bottom: 1px solid var(--border);
         flex: none;
       }
-      header .title { font-weight: 600; margin-right: auto; }
-      header .title small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+      .app-header .title { font-weight: 600; font-size: 16px; margin: 0; margin-right: auto; }
+      .app-header .title small { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+      /* Keep every button on one line — never shrink or wrap its label. */
+      .app-header button { flex: none; white-space: nowrap; }
       button {
         font: inherit;
         color: var(--text);
@@ -104,41 +109,28 @@
       .status.ok .dot { background: #3fb950; }
       .status.off .dot { background: var(--error); }
 
-      /* Modal */
+      /* Settings page — fills 100% of the window, replacing the log view while open. */
       .overlay {
         position: fixed;
         inset: 0;
-        background: rgba(1, 4, 9, 0.7);
+        background: var(--bg);
         display: none;
-        align-items: center;
-        justify-content: center;
-        padding: 20px;
+        flex-direction: column;
       }
       .overlay.open { display: flex; }
+      /* Scrollable body between the sticky header and footer. */
       .modal {
+        flex: 1;
         width: 100%;
-        max-width: 440px;
-        max-height: 100%;
+        max-width: none;
         overflow-y: auto;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 20px;
-      }
-      .modal-header { display: flex; align-items: flex-start; gap: 8px; }
-      .modal-header h2 { margin: 0 0 4px; font-size: 16px; flex: 1; }
-      .modal .close {
-        flex: none;
-        margin: -4px -4px 0 0;
-        padding: 4px 8px;
-        font-size: 18px;
-        line-height: 1;
-        background: none;
+        background: var(--bg);
         border: none;
-        color: var(--muted);
+        border-radius: 0;
+        padding: 16px 20px 24px;
       }
-      .modal .close:hover { background: #30363d; color: var(--text); }
-      .modal h2 { margin: 0 0 4px; font-size: 16px; }
+      /* Keep form rows readable on a wide window while the page itself fills 100%. */
+      .modal > * { max-width: 640px; margin-left: auto; margin-right: auto; }
       .modal p.hint { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
       .field { margin-bottom: 12px; }
       .field label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted); }
@@ -152,17 +144,65 @@
         padding: 7px 10px;
       }
       .field input:focus { outline: none; border-color: var(--accent); }
+      /* input-with-hints — small gray suggestion buttons below an input that fill its value. */
+      .input-with-hints .hints {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 6px;
+      }
+      .input-with-hints .hints .hint {
+        padding: 2px 8px;
+        font-size: 11px;
+        color: var(--muted);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      .input-with-hints .hints .hint:hover { color: var(--text); background: #21262d; }
+      /* Hotkey capture row: a readonly input that shows the combo + a clear button. */
+      .hotkey { display: flex; gap: 6px; align-items: stretch; }
+      .hotkey .hotkey-input {
+        flex: 1;
+        cursor: pointer;
+        font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+        text-align: center;
+      }
+      /* While listening for a combo, highlight the field and prompt the user. */
+      .hotkey.capturing .hotkey-input {
+        border-color: var(--accent);
+        color: var(--muted);
+      }
+      .hotkey .hotkey-clear {
+        flex: none;
+        padding: 0 10px;
+        color: var(--muted);
+      }
+      .hotkey .hotkey-clear:hover { color: var(--text); }
       .modal .error {
         color: var(--error);
         font-size: 12px;
         margin: 0 0 12px;
         min-height: 0;
       }
+      /* Sticky footer — Cancel/Save always visible below the scrolling body.
+         The inner row is capped to match the form's readable width above. */
       .modal-actions {
+        flex: none;
         display: flex;
         gap: 8px;
         justify-content: flex-end;
-        margin-top: 16px;
+        padding: 12px 20px;
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+      }
+      .modal-actions > .row {
+        display: flex;
+        gap: 8px;
+        width: 100%;
+        max-width: 640px;
+        margin: 0 auto;
+        justify-content: flex-end;
       }
       .modal-actions .spacer { margin-right: auto; }
       /* Danger zone — destructive actions, set apart from normal settings */
@@ -225,26 +265,16 @@
     </style>
   </head>
   <body>
-    <header>
-      <span class="title">Samsung TV Control<small>log</small></span>
-      <span class="status" id="status"><span class="dot"></span><span id="statusText">Checking…</span></span>
-      <button id="loginBtn">Sign in</button>
-      <button id="settingsBtn">Settings</button>
-      <button id="wake" class="primary">Wake TV → PC</button>
-      <button id="off">TV off + sleep</button>
-      <button id="clear">Clear</button>
-    </header>
+    <!-- Universal header, populated by renderHeader() in the script below. -->
+    <div id="mainHeader"></div>
 
-    <div class="overlay" id="settingsOverlay">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
-        <div class="modal-header">
-          <h2 id="settingsTitle">Settings</h2>
-          <button id="settingsCloseBtn" class="close" aria-label="Close">&times;</button>
-        </div>
+    <div class="overlay" id="settingsOverlay" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <!-- Same universal header component, just a different title + buttons. -->
+      <div id="settingsHeader"></div>
+      <div class="modal">
         <p class="hint">
           Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use
-          Sign in (in the toolbar) to approve access — tokens are stored automatically. The PC
-          input is matched against the TV's inputs by id or label.
+          Sign in (in the toolbar) to approve access — tokens are stored automatically.
         </p>
         <div class="field">
           <label for="clientId">Client ID</label>
@@ -258,9 +288,24 @@
           <label for="redirectUri">Redirect URI</label>
           <input id="redirectUri" type="text" autocomplete="off" spellcheck="false" />
         </div>
-        <div class="field">
+        <div class="field input-with-hints">
           <label for="pcInput">PC input</label>
           <input id="pcInput" type="text" autocomplete="off" spellcheck="false" placeholder="HDMI2" />
+          <div class="hints" id="pcInputHints"></div>
+        </div>
+        <div class="field">
+          <label>Wake TV → PC hotkey</label>
+          <div class="hotkey" id="wakeHotkey">
+            <input class="hotkey-input" type="text" readonly placeholder="Click, then press a combo" />
+            <button type="button" class="hotkey-clear" title="Clear" aria-label="Clear hotkey">&times;</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>TV Off &amp; Sleep hotkey</label>
+          <div class="hotkey" id="offHotkey">
+            <input class="hotkey-input" type="text" readonly placeholder="Click, then press a combo" />
+            <button type="button" class="hotkey-clear" title="Clear" aria-label="Clear hotkey">&times;</button>
+          </div>
         </div>
         <div class="field check">
           <span class="switch">
@@ -270,14 +315,16 @@
           <label for="minimizeToTray">Hide to tray on close (keep running in the background)</label>
         </div>
         <p class="error" id="settingsError"></p>
-        <div class="modal-actions">
-          <button id="settingsCancelBtn">Cancel</button>
-          <button id="settingsSaveBtn" class="primary">Save</button>
-        </div>
         <div class="danger-zone" id="dangerZone">
           <h3>Danger zone</h3>
           <p>Sign out to clear stored tokens from this device.</p>
           <button id="logoutBtn" class="danger">Sign out</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <div class="row">
+          <button id="settingsCancelBtn">Cancel</button>
+          <button id="settingsSaveBtn" class="primary">Save</button>
         </div>
       </div>
     </div>
@@ -289,6 +336,90 @@
 
     <script>
       const api = window.tvAPI;
+
+      // --- Universal header ---------------------------------------------------
+      // One header component, one style, shared by the main screen and Settings.
+      // spec = { title, subtitle?, extra?, buttons: [{ id?, text, class?, ariaLabel?, onClick? }] }.
+      // `extra` is an arbitrary node placed between the title and the buttons (e.g. the auth
+      // status pill). Returns the created elements keyed by their button id for later wiring.
+      function renderHeader(mount, spec) {
+        mount.className = "app-header";
+        mount.replaceChildren();
+
+        const title = document.createElement("h2");
+        title.className = "title";
+        if (spec.titleId) title.id = spec.titleId;
+        title.append(document.createTextNode(spec.title));
+        if (spec.subtitle) {
+          const small = document.createElement("small");
+          small.textContent = spec.subtitle;
+          title.appendChild(small);
+        }
+        mount.appendChild(title);
+
+        if (spec.extra) mount.appendChild(spec.extra);
+
+        const refs = {};
+        for (const b of spec.buttons || []) {
+          const btn = document.createElement("button");
+          if (b.id) { btn.id = b.id; refs[b.id] = btn; }
+          if (b.class) btn.className = b.class;
+          if (b.ariaLabel) btn.setAttribute("aria-label", b.ariaLabel);
+          btn.textContent = b.text;
+          if (b.onClick) btn.addEventListener("click", b.onClick);
+          mount.appendChild(btn);
+        }
+        return refs;
+      }
+
+      // --- input-with-hints ---------------------------------------------------
+      // Attaches small gray suggestion buttons (rendered into `hintsEl`) below `input`.
+      // Clicking a hint fills the input with that value and focuses it.
+      function makeInputWithHints(input, hintsEl, hints) {
+        hintsEl.replaceChildren();
+        for (const value of hints) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "hint";
+          btn.textContent = value;
+          btn.addEventListener("click", () => {
+            input.value = value;
+            input.focus();
+          });
+          hintsEl.appendChild(btn);
+        }
+      }
+
+      // Auth status pill — lives in the main header as its `extra` slot.
+      const statusPill = document.createElement("span");
+      statusPill.className = "status";
+      statusPill.id = "status";
+      statusPill.innerHTML = '<span class="dot"></span><span id="statusText">Checking…</span>';
+
+      // Main screen header: title + status pill + action buttons. Click handlers are attached
+      // later (once their helpers exist), so here we only declare ids to wire up by reference.
+      renderHeader(document.getElementById("mainHeader"), {
+        title: "Samsung TV Control",
+        subtitle: "log",
+        extra: statusPill,
+        buttons: [
+          { id: "loginBtn", text: "Sign in" },
+          { id: "settingsBtn", text: "Settings" },
+          { id: "wake", text: "Wake TV → PC", class: "primary" },
+          { id: "off", text: "TV off + sleep" },
+          { id: "clear", text: "Clear" },
+        ],
+      });
+
+      // Settings header: same component, just a title and a single close button.
+      renderHeader(document.getElementById("settingsHeader"), {
+        title: "Settings",
+        titleId: "settingsTitle",
+        buttons: [
+          { id: "settingsCloseBtn", text: "Close", ariaLabel: "Close" },
+        ],
+      });
+
       const logEl = document.getElementById("log");
       const countEl = document.getElementById("count");
       const autoscrollEl = document.getElementById("autoscroll");
@@ -326,7 +457,16 @@
         if (last < text.length) div.appendChild(document.createTextNode(text.slice(last)));
       }
 
+      // Each entry carries a monotonic id from the main process. The history backlog and the live
+      // onLog stream can overlap (a line logged right as the window opens lands in both), so dedupe
+      // by id to render every line exactly once.
+      const seenIds = new Set();
+
       function append(entry) {
+        if (entry.id !== undefined) {
+          if (seenIds.has(entry.id)) return;
+          seenIds.add(entry.id);
+        }
         const atBottom = nearBottom();
         const div = document.createElement("div");
         div.className = "line" + (entry.level === "error" ? " error" : "");
@@ -341,17 +481,20 @@
 
       function reset() {
         logEl.replaceChildren();
+        seenIds.clear();
         count = 0;
         countEl.textContent = "0 lines";
       }
+
+      // Subscribe to the live stream BEFORE fetching history so a line logged in the gap isn't lost;
+      // append() dedupes by id, so any overlap between the two sources renders only once.
+      api.onLog(append);
 
       (async () => {
         const history = await api.getHistory();
         for (const entry of history) append(entry);
         logEl.scrollTop = logEl.scrollHeight;
       })();
-
-      api.onLog(append);
 
       document.getElementById("wake").addEventListener("click", () => api.wakeTv());
       document.getElementById("off").addEventListener("click", () => api.tvOffSleep());
@@ -409,6 +552,9 @@
       const clientSecretEl = document.getElementById("clientSecret");
       const redirectUriEl = document.getElementById("redirectUri");
       const pcInputEl = document.getElementById("pcInput");
+      makeInputWithHints(pcInputEl, document.getElementById("pcInputHints"), [
+        "HDMI1", "HDMI2", "HDMI3", "HDMI4",
+      ]);
       const minimizeToTrayEl = document.getElementById("minimizeToTray");
       const settingsErrorEl = document.getElementById("settingsError");
       const settingsSaveBtn = document.getElementById("settingsSaveBtn");
@@ -417,6 +563,82 @@
       const logoutBtn = document.getElementById("logoutBtn");
       const dangerZone = document.getElementById("dangerZone");
 
+      // --- Hotkey capture ----------------------------------------------------
+      // Wraps a .hotkey widget: click to listen, press a combo, and it's stored as an Electron
+      // accelerator string (e.g. "Command+Control+E") on the element. A valid combo needs at least
+      // one modifier plus a non-modifier key, so a global shortcut can't swallow normal typing.
+      const IS_MAC = navigator.platform.toLowerCase().includes("mac");
+      // Map a KeyboardEvent.code/key to the accelerator key token Electron expects.
+      function acceleratorKey(e) {
+        const code = e.code;
+        if (/^Key[A-Z]$/.test(code)) return code.slice(3); // KeyE → E
+        if (/^Digit\d$/.test(code)) return code.slice(5); // Digit1 → 1
+        if (/^F\d{1,2}$/.test(code)) return code; // F1..F24
+        const named = {
+          Space: "Space", Enter: "Return", Tab: "Tab", Backspace: "Backspace",
+          Delete: "Delete", Escape: "Escape", ArrowUp: "Up", ArrowDown: "Down",
+          ArrowLeft: "Left", ArrowRight: "Right", Equal: "Plus", Minus: "-",
+        };
+        return named[code] || null;
+      }
+      function makeHotkeyField(id) {
+        const root = document.getElementById(id);
+        const input = root.querySelector(".hotkey-input");
+        const clearBtn = root.querySelector(".hotkey-clear");
+        let accel = ""; // current accelerator string, "" = unset
+        let capturing = false;
+
+        function render() {
+          input.value = accel || "";
+          input.placeholder = capturing ? "Press a combo…" : "Click, then press a combo";
+          root.classList.toggle("capturing", capturing);
+        }
+        function stop() {
+          capturing = false;
+          window.removeEventListener("keydown", onKeyDown, true);
+          render();
+        }
+        function onKeyDown(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.key === "Escape") return stop(); // cancel, keep the previous value
+          const key = acceleratorKey(e);
+          // Ignore a press that's only modifiers — wait for the real key.
+          if (!key) return;
+          const mods = [];
+          if (e.metaKey) mods.push("Command");
+          if (e.ctrlKey) mods.push("Control");
+          if (e.altKey) mods.push("Alt");
+          if (e.shiftKey) mods.push("Shift");
+          if (mods.length === 0) {
+            // Reject a bare key — needs at least one modifier to be a safe global shortcut.
+            settingsErrorEl.textContent = "Hotkey needs at least one modifier (⌘/Ctrl/Alt/Shift).";
+            return;
+          }
+          settingsErrorEl.textContent = "";
+          accel = [...mods, key].join("+");
+          stop();
+        }
+        input.addEventListener("click", () => {
+          if (capturing) return;
+          capturing = true;
+          render();
+          window.addEventListener("keydown", onKeyDown, true);
+        });
+        clearBtn.addEventListener("click", () => {
+          accel = "";
+          if (capturing) stop();
+          else render();
+        });
+        return {
+          set: (v) => { accel = v || ""; if (capturing) stop(); else render(); },
+          get: () => accel,
+          stop,
+        };
+      }
+      const wakeHotkeyField = makeHotkeyField("wakeHotkey");
+      const offHotkeyField = makeHotkeyField("offHotkey");
+
       async function openSettings() {
         const s = await api.getSettings();
         clientIdEl.value = s.clientId || "";
@@ -424,6 +646,8 @@
         redirectUriEl.value = s.redirectUri || "";
         pcInputEl.value = s.pcInput || "";
         minimizeToTrayEl.checked = s.minimizeToTrayOnClose;
+        wakeHotkeyField.set(s.wakeHotkey || "");
+        offHotkeyField.set(s.offHotkey || "");
         settingsErrorEl.textContent = "";
         const status = await api.authStatus();
         // Sign out only makes sense when actually signed in.
@@ -433,6 +657,9 @@
       }
 
       function closeSettings() {
+        // Drop any in-progress capture so its keydown listener doesn't outlive the modal.
+        wakeHotkeyField.stop();
+        offHotkeyField.stop();
         settingsOverlay.classList.remove("open");
       }
 
@@ -440,9 +667,6 @@
       api.onOpenSettings(openSettings);
       settingsCancelBtn.addEventListener("click", closeSettings);
       settingsCloseBtn.addEventListener("click", closeSettings);
-      settingsOverlay.addEventListener("click", (e) => {
-        if (e.target === settingsOverlay) closeSettings();
-      });
 
       settingsSaveBtn.addEventListener("click", async () => {
         settingsErrorEl.textContent = "";
@@ -459,6 +683,8 @@
           redirectUri: redirectUriEl.value.trim(),
           pcInput,
           minimizeToTrayOnClose: minimizeToTrayEl.checked,
+          wakeHotkey: wakeHotkeyField.get(),
+          offHotkey: offHotkeyField.get(),
         });
         settingsSaveBtn.disabled = false;
         settingsCancelBtn.disabled = false;

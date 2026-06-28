@@ -12,16 +12,23 @@
 // arrive.
 
 import { createApp } from "./app.js";
-import { matchHotkey, isWithinBootWindow, TriggerGate, withRetry, type Platform, type KeyEvent, type ModifierState } from "./domain/daemon.js";
+import { matchHotkey, parseHotkey, hotkeyLabel, isWithinBootWindow, TriggerGate, withRetry, type Hotkey, type KeyEvent, type ModifierState, type Platform } from "./domain/daemon.js";
 import { startKeyListener } from "./os/key-listener.js";
 import { onWake } from "./os/wake-watch.js";
 import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
+import { loadConfig } from "./config.js";
 import { log, logError, useTimestamps } from "./log.js";
 
 const isMac = process.platform === "darwin";
 const PLATFORM: Platform = isMac ? "mac" : "other";
+// Default combos when the user hasn't configured one. These are also the labels shown in the tray
+// menu and startup log. A configured hotkey (config.wakeHotkey / config.offHotkey) overrides these.
 export const ON_COMBO_LABEL = isMac ? "Cmd+Ctrl+E" : "Ctrl+Alt+E";
 export const OFF_COMBO_LABEL = isMac ? "Cmd+Ctrl+Q" : "Ctrl+Alt+Q";
+// As Electron accelerator strings, so parseHotkey can turn the defaults into the same Hotkey shape
+// a configured value parses to. Cmd→meta on mac; Ctrl+Alt elsewhere.
+const DEFAULT_WAKE_ACCEL = isMac ? "Command+Control+E" : "Control+Alt+E";
+const DEFAULT_OFF_ACCEL = isMac ? "Command+Control+Q" : "Control+Alt+Q";
 
 // No cooldown window: a new trigger may fire the instant the previous handler finishes. The gate
 // still rejects triggers *while* a handler is running, so key auto-repeat / a held combo can't
@@ -50,6 +57,9 @@ export interface Daemon {
   triggerOn(): Promise<void>;
   // Turn the TV off (only if on PC input), then put this PC to sleep.
   triggerOffAndSleep(): Promise<void>;
+  // Re-read the configured hotkey combos and apply them to the live key matcher. Called after
+  // Settings saves so a changed combo takes effect without restarting the daemon.
+  reloadHotkeys(): Promise<void>;
   // Tear down the wake watcher and key listener.
   stop(): void;
 }
@@ -60,15 +70,22 @@ export async function startDaemon(): Promise<Daemon> {
   const app = createApp();
   const gate = new TriggerGate(COOLDOWN_MS);
 
+  // Active hotkey specs, parsed from config (falling back to the platform defaults). Mutable so
+  // reloadHotkeys() can swap them in place while the key listener keeps running. A null spec means
+  // that action has no bound hotkey (the user cleared it) — handleKey simply won't match it.
+  // Declared up here so the trigger handlers below can label their logs with the live combo.
+  let wakeKey: Hotkey | null = parseHotkey(DEFAULT_WAKE_ACCEL);
+  let offKey: Hotkey | null = parseHotkey(DEFAULT_OFF_ACCEL);
+
   // Wake the TV and switch it to the PC input (Cmd/Ctrl + E, on PC wake, and at boot). Retries the
   // whole operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, on a thrown error — so a network
   // stack that's still reconnecting right after the PC resumes gets several chances rather than one.
   async function triggerOn(): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
-      log(`${ON_COMBO_LABEL} ignored — a command is still running.`);
+      log(`${hotkeyLabel(wakeKey, PLATFORM)} ignored — a command is still running.`);
       return;
     }
-    log(`\n${ON_COMBO_LABEL} → waking TV and switching to PC...`);
+    log(`\n${hotkeyLabel(wakeKey, PLATFORM)} → waking TV and switching to PC...`);
     try {
       await withRetry(
         () => app.switch(),
@@ -88,10 +105,10 @@ export async function startDaemon(): Promise<Daemon> {
   // Turn the TV off, then immediately put this PC to sleep (Cmd/Ctrl + Q).
   async function triggerOffAndSleep(): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
-      log(`${OFF_COMBO_LABEL} ignored — a command is still running.`);
+      log(`${hotkeyLabel(offKey, PLATFORM)} ignored — a command is still running.`);
       return;
     }
-    log(`\n${OFF_COMBO_LABEL} → turning TV off, then sleeping this PC...`);
+    log(`\n${hotkeyLabel(offKey, PLATFORM)} → turning TV off, then sleeping this PC...`);
     try {
       await app.off();
       log("Putting this PC to sleep...");
@@ -103,9 +120,33 @@ export async function startDaemon(): Promise<Daemon> {
     }
   }
 
+  // Read the configured combos and update wakeKey/offKey. An empty config value falls back to the
+  // platform default; a non-empty value that fails to parse leaves the previous spec untouched and
+  // logs, so a typo in a hand-edited config can't silently unbind the action.
+  async function loadHotkeys(): Promise<void> {
+    const config = await loadConfig();
+    const apply = (configured: string | undefined, fallback: string, label: string, set: (hk: Hotkey | null) => void): void => {
+      const accel = configured?.trim();
+      if (!accel) {
+        set(parseHotkey(fallback)); // unset → default
+        return;
+      }
+      const parsed = parseHotkey(accel);
+      if (!parsed) {
+        logError(`Ignoring invalid ${label} hotkey "${accel}" — keeping the previous binding.`);
+        return; // leave the current spec untouched
+      }
+      set(parsed);
+    };
+    apply(config.wakeHotkey, DEFAULT_WAKE_ACCEL, "wake", (hk) => (wakeKey = hk));
+    apply(config.offHotkey, DEFAULT_OFF_ACCEL, "off", (hk) => (offKey = hk));
+  }
+
+  await loadHotkeys();
+
   const handleKey = (e: KeyEvent, mods: ModifierState) => {
-    if (matchHotkey(e, mods, "E", PLATFORM)) void triggerOn();
-    else if (matchHotkey(e, mods, "Q", PLATFORM)) void triggerOffAndSleep();
+    if (wakeKey && matchHotkey(e, mods, wakeKey)) void triggerOn();
+    else if (offKey && matchHotkey(e, mods, offKey)) void triggerOffAndSleep();
   };
 
   // Starting the global keyboard hook can fail — most commonly on macOS when Accessibility
@@ -163,10 +204,21 @@ export async function startDaemon(): Promise<Daemon> {
   const rearmTimer = setInterval(() => void rearmKeys(), REARM_INTERVAL_MS);
   rearmTimer.unref?.(); // don't keep the process alive just for the watchdog
 
-  log("TV daemon running.");
-  log(`  ${ON_COMBO_LABEL}  → wake the TV and switch to PC`);
-  log(`  ${OFF_COMBO_LABEL}  → turn the TV off, then sleep this PC`);
-  log("  Auto-wakes the TV when this PC resumes from sleep.");
+  // Log the *active* combos (which may be user-configured), not just the defaults.
+  function logHotkeys(): void {
+    log("TV daemon running.");
+    log(`  ${hotkeyLabel(wakeKey, PLATFORM)}  → wake the TV and switch to PC`);
+    log(`  ${hotkeyLabel(offKey, PLATFORM)}  → turn the TV off, then sleep this PC`);
+    log("  Auto-wakes the TV when this PC resumes from sleep.");
+  }
+  logHotkeys();
+
+  // Re-read config and apply the new combos. The key listener keeps running and matches against
+  // the updated specs on the next keystroke — no listener teardown needed.
+  async function reloadHotkeys(): Promise<void> {
+    await loadHotkeys();
+    log(`Hotkeys updated → wake: ${hotkeyLabel(wakeKey, PLATFORM)}, off: ${hotkeyLabel(offKey, PLATFORM)}`);
+  }
 
   function stop(): void {
     clearInterval(rearmTimer);
@@ -174,5 +226,5 @@ export async function startDaemon(): Promise<Daemon> {
     stopKeys();
   }
 
-  return { triggerOn, triggerOffAndSleep, stop };
+  return { triggerOn, triggerOffAndSleep, reloadHotkeys, stop };
 }

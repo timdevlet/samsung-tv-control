@@ -35,6 +35,12 @@ export interface TVConfig {
   // When true (default), closing the window hides it to the tray and the daemon
   // keeps running. When false, closing the window quits the app.
   minimizeToTrayOnClose?: boolean;
+
+  // Global hotkeys (Electron accelerator strings like "Command+Control+E").
+  // Registered system-wide; empty/unset means the action has no hotkey.
+  // wakeHotkey fires "Wake TV → PC"; offHotkey fires "TV Off & Sleep".
+  wakeHotkey?: string;
+  offHotkey?: string;
 }
 
 const DEFAULTS: TVConfig = {

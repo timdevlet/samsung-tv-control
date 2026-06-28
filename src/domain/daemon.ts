@@ -14,12 +14,105 @@ export interface ModifierState {
   ctrl: boolean;
   alt: boolean;
   meta: boolean;
+  shift: boolean;
 }
 
-// True when the configured modifiers are held and `key` is the key going down.
-export function matchHotkey(e: KeyEvent, mods: ModifierState, key: string, platform: Platform): boolean {
-  if (e.state !== "DOWN" || e.name !== key) return false;
-  return platform === "mac" ? mods.meta && mods.ctrl : mods.ctrl && mods.alt;
+// A parsed hotkey combo: the required key plus the exact modifier set. Parsed once from a
+// user-configured accelerator string, then matched against live key events.
+export interface Hotkey {
+  key: string; // uiohook key name, e.g. "E", "Q", "F8"
+  ctrl: boolean;
+  alt: boolean;
+  meta: boolean;
+  shift: boolean;
+}
+
+// Map an accelerator token (Electron-style, as produced by the renderer's capture UI) to the
+// uiohook key name that startKeyListener emits. Modifiers are handled separately; this is only
+// for the non-modifier key. Letters/digits pass through uppercased; the rest are explicit so a
+// captured "ArrowUp" or "Escape" matches what uiohook reports.
+const KEY_ALIASES: Record<string, string> = {
+  ESC: "Escape",
+  ESCAPE: "Escape",
+  SPACE: "Space",
+  PLUS: "Equal",
+  RETURN: "Enter",
+  ENTER: "Enter",
+  TAB: "Tab",
+  BACKSPACE: "Backspace",
+  DELETE: "Delete",
+  UP: "ArrowUp",
+  DOWN: "ArrowDown",
+  LEFT: "ArrowLeft",
+  RIGHT: "ArrowRight",
+};
+
+// Parse an Electron accelerator string ("Command+Control+E", "Ctrl+Alt+F8") into a Hotkey, or
+// return null if it's empty/has no non-modifier key. Modifier names follow Electron's accelerator
+// vocabulary (Command/Cmd, Control/Ctrl, Alt/Option, Shift, and the CmdOrCtrl alias). Matching is
+// case-insensitive on the token names.
+export function parseHotkey(accelerator: string): Hotkey | null {
+  if (!accelerator) return null;
+  const parts = accelerator.split("+").map((p) => p.trim()).filter(Boolean);
+  const hk: Hotkey = { key: "", ctrl: false, alt: false, meta: false, shift: false };
+  for (const part of parts) {
+    switch (part.toLowerCase()) {
+      case "command":
+      case "cmd":
+      case "super":
+      case "meta":
+        hk.meta = true;
+        break;
+      case "control":
+      case "ctrl":
+        hk.ctrl = true;
+        break;
+      case "cmdorctrl":
+      case "commandorcontrol":
+        // Resolved per-platform at capture time; treat as meta on mac, ctrl elsewhere isn't known
+        // here, so set both and let matching require whichever the event carries.
+        hk.meta = true;
+        hk.ctrl = true;
+        break;
+      case "alt":
+      case "option":
+        hk.alt = true;
+        break;
+      case "shift":
+        hk.shift = true;
+        break;
+      default: {
+        const upper = part.toUpperCase();
+        hk.key = KEY_ALIASES[upper] ?? upper;
+      }
+    }
+  }
+  return hk.key ? hk : null;
+}
+
+// Render a Hotkey as a short human label for logs/menus, using the platform's modifier names
+// (mac shows Cmd/Ctrl/Opt; elsewhere Ctrl/Alt). Order matches the common convention.
+export function hotkeyLabel(hotkey: Hotkey | null, platform: Platform): string {
+  if (!hotkey) return "unset";
+  const parts: string[] = [];
+  if (hotkey.ctrl) parts.push("Ctrl");
+  if (hotkey.alt) parts.push(platform === "mac" ? "Opt" : "Alt");
+  if (hotkey.shift) parts.push("Shift");
+  if (hotkey.meta) parts.push(platform === "mac" ? "Cmd" : "Win");
+  parts.push(hotkey.key);
+  return parts.join("+");
+}
+
+// True when the event is `hotkey`'s key going down with exactly its modifier set held. The match is
+// exact on every modifier so Cmd+Ctrl+E doesn't also fire on Cmd+Ctrl+Shift+E.
+export function matchHotkey(e: KeyEvent, mods: ModifierState, hotkey: Hotkey): boolean {
+  if (e.state !== "DOWN" || e.name !== hotkey.key) return false;
+  return (
+    mods.ctrl === hotkey.ctrl &&
+    mods.alt === hotkey.alt &&
+    mods.meta === hotkey.meta &&
+    mods.shift === hotkey.shift
+  );
 }
 
 // Boot window

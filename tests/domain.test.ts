@@ -3,7 +3,7 @@ import { pickInput, isOnInput, parseStatus, pickTV, mainCapabilities, type TVSta
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
 import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "../src/domain/config.js";
-import { matchHotkey, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
+import { matchHotkey, parseHotkey, hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
 
@@ -144,22 +144,59 @@ describe("config policy", () => {
   });
 });
 
+describe("parseHotkey", () => {
+  it("parses a mac-style combo", () => {
+    expect(parseHotkey("Command+Control+E")).toEqual({ key: "E", ctrl: true, alt: false, meta: true, shift: false });
+  });
+  it("parses a win/linux-style combo with Alt", () => {
+    expect(parseHotkey("Control+Alt+Q")).toEqual({ key: "Q", ctrl: true, alt: true, meta: false, shift: false });
+  });
+  it("accepts modifier aliases and is case-insensitive", () => {
+    expect(parseHotkey("cmd+shift+f8")).toEqual({ key: "F8", ctrl: false, alt: false, meta: true, shift: true });
+  });
+  it("maps named keys to uiohook names", () => {
+    expect(parseHotkey("Ctrl+Up")?.key).toBe("ArrowUp");
+    expect(parseHotkey("Ctrl+Esc")?.key).toBe("Escape");
+  });
+  it("returns null for empty or modifier-only input", () => {
+    expect(parseHotkey("")).toBeNull();
+    expect(parseHotkey("Command+Control")).toBeNull();
+  });
+});
+
 describe("matchHotkey", () => {
   const downE = { state: "DOWN", name: "E" };
+  const macWakeE = { key: "E", ctrl: true, alt: false, meta: true, shift: false };
+  const otherWakeE = { key: "E", ctrl: true, alt: true, meta: false, shift: false };
   it("matches meta+ctrl on mac", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: true }, "E", "mac")).toBe(true);
+    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: true, shift: false }, macWakeE)).toBe(true);
   });
   it("matches ctrl+alt on other", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: true, meta: false }, "E", "other")).toBe(true);
+    expect(matchHotkey(downE, { ctrl: true, alt: true, meta: false, shift: false }, otherWakeE)).toBe(true);
   });
   it("rejects the wrong key", () => {
-    expect(matchHotkey({ state: "DOWN", name: "Q" }, { ctrl: true, alt: true, meta: false }, "E", "other")).toBe(false);
+    expect(matchHotkey({ state: "DOWN", name: "Q" }, { ctrl: true, alt: true, meta: false, shift: false }, otherWakeE)).toBe(false);
   });
   it("rejects key-up events", () => {
-    expect(matchHotkey({ state: "UP", name: "E" }, { ctrl: true, alt: true, meta: false }, "E", "other")).toBe(false);
+    expect(matchHotkey({ state: "UP", name: "E" }, { ctrl: true, alt: true, meta: false, shift: false }, otherWakeE)).toBe(false);
   });
   it("rejects when modifiers aren't held", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: false }, "E", "other")).toBe(false);
+    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: false, shift: false }, otherWakeE)).toBe(false);
+  });
+  it("matches modifiers exactly — extra Shift held means no match", () => {
+    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: true, shift: true }, macWakeE)).toBe(false);
+  });
+});
+
+describe("hotkeyLabel", () => {
+  it("renders mac modifier names", () => {
+    expect(hotkeyLabel(parseHotkey("Command+Control+E"), "mac")).toBe("Ctrl+Cmd+E");
+  });
+  it("renders non-mac modifier names", () => {
+    expect(hotkeyLabel(parseHotkey("Control+Alt+Q"), "other")).toBe("Ctrl+Alt+Q");
+  });
+  it("shows 'unset' for a null hotkey", () => {
+    expect(hotkeyLabel(null, "mac")).toBe("unset");
   });
 });
 

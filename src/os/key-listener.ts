@@ -21,7 +21,7 @@ const KEYCODE_TO_NAME: Record<number, string> = Object.fromEntries(
 );
 
 function toModifiers(e: UiohookKeyboardEvent): ModifierState {
-  return { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey };
+  return { ctrl: e.ctrlKey, alt: e.altKey, meta: e.metaKey, shift: e.shiftKey };
 }
 
 // Start listening for global key events, mapped to neutral domain shapes. Returns a stop

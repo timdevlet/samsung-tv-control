@@ -11,7 +11,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } fro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startDaemon, ON_COMBO_LABEL, OFF_COMBO_LABEL, type Daemon } from "../daemon-core.js";
-import { onLog, log, type LogEntry } from "../log.js";
+import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
 import { getSettings, saveSettings, type AppSettings } from "./settings.js";
 
@@ -48,8 +48,8 @@ function createWindow(): BrowserWindow {
   const w = new BrowserWindow({
     width: 860,
     height: 580,
-    minWidth: 520,
-    minHeight: 320,
+    minWidth: 700,
+    minHeight: 500,
     title: "Samsung TV Control",
     icon: nativeImage.createFromPath(path.join(__dirname, "icon.png")),
     backgroundColor: "#0d1117",
@@ -189,17 +189,19 @@ async function start(): Promise<void> {
   ipcMain.handle("settings:get", () => getSettings());
   ipcMain.handle("settings:save", async (_e, partial: Partial<AppSettings>) => {
     await saveSettings(partial);
-    minimizeToTrayOnClose = (await getSettings()).minimizeToTrayOnClose;
+    const next = await getSettings();
+    minimizeToTrayOnClose = next.minimizeToTrayOnClose;
+    // Apply changed hotkey combos to the running daemon without a restart.
+    daemon?.reloadHotkeys();
     return { ok: true as const };
   });
 
   try {
     daemon = await startDaemon();
   } catch (err) {
-    const message = `Failed to start daemon: ${err instanceof Error ? err.message : String(err)}`;
-    const entry: LogEntry = { level: "error", message };
-    pushHistory(entry);
-    sendLog(entry);
+    // Route through logError so the line gets an id and flows through the normal onLog fan-out
+    // (which already does pushHistory + sendLog), keeping it deduplicatable like every other line.
+    logError(`Failed to start daemon: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
