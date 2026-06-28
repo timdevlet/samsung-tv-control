@@ -7,11 +7,12 @@
 // runs. Logs reach the window by subscribing to the logger's onLog() and forwarding each line
 // over IPC; a bounded backlog is kept so a freshly-opened window can render history.
 
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } from "electron";
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startDaemon, ON_COMBO_LABEL, OFF_COMBO_LABEL, type Daemon } from "../daemon-core.js";
-import { onLog, type LogEntry } from "../log.js";
+import { onLog, log, type LogEntry } from "../log.js";
+import { getAuthStatus, login as runLogin, logout as runLogout, type ClientCredentials } from "./auth.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,6 +99,9 @@ function buildTray(): void {
 }
 
 async function start(): Promise<void> {
+  // Force dark app appearance so the native macOS title bar (and other system chrome) is drawn
+  // dark to match the window's black UI, rather than following the OS's light/dark setting.
+  nativeTheme.themeSource = "dark";
   Menu.setApplicationMenu(null);
   buildTray();
   win = createWindow();
@@ -114,6 +118,25 @@ async function start(): Promise<void> {
   });
   ipcMain.on("action:on", () => void daemon?.triggerOn());
   ipcMain.on("action:off", () => void daemon?.triggerOffAndSleep());
+
+  // Auth: the GUI equivalent of `npm run login` / `npm run reset`. The daemon reloads config on
+  // every action, so newly-saved tokens take effect on the next Wake without a restart.
+  ipcMain.handle("auth:status", () => getAuthStatus());
+  ipcMain.handle("auth:login", async (_e, creds: ClientCredentials) => {
+    try {
+      await runLogin(win, creds);
+      log("\n✅ Signed in to SmartThings — tokens saved and will refresh automatically.");
+      return { ok: true as const };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false as const, error: message };
+    }
+  });
+  ipcMain.handle("auth:logout", async () => {
+    await runLogout();
+    log("Signed out — cleared stored SmartThings credentials.");
+    return { ok: true as const };
+  });
 
   try {
     daemon = await startDaemon();

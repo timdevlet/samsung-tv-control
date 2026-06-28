@@ -4,6 +4,9 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { LogEntry } from "../log.js";
+import type { AuthStatus, ClientCredentials } from "./auth.js";
+
+type AuthResult = { ok: true } | { ok: false; error: string };
 
 contextBridge.exposeInMainWorld("tvAPI", {
   // Subscribe to live log lines. Returns an unsubscribe function.
@@ -17,4 +20,8 @@ contextBridge.exposeInMainWorld("tvAPI", {
   clearHistory: (): void => ipcRenderer.send("log:clear"),
   wakeTv: (): void => ipcRenderer.send("action:on"),
   tvOffSleep: (): void => ipcRenderer.send("action:off"),
+  // Auth
+  authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
+  login: (creds: ClientCredentials): Promise<AuthResult> => ipcRenderer.invoke("auth:login", creds),
+  logout: (): Promise<AuthResult> => ipcRenderer.invoke("auth:logout"),
 });

@@ -29,7 +29,7 @@
         align-items: center;
         gap: 8px;
         padding: 10px 14px;
-        background: var(--panel);
+        background: var(--bg);
         border-bottom: 1px solid var(--border);
         flex: none;
       }
@@ -76,15 +76,112 @@
       }
       footer label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
       .count { margin-left: auto; }
+
+      /* Auth status pill in the header */
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-right: 4px;
+      }
+      .status .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+        flex: none;
+      }
+      .status.ok .dot { background: #3fb950; }
+      .status.off .dot { background: var(--error); }
+
+      /* Modal */
+      .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(1, 4, 9, 0.7);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+      .overlay.open { display: flex; }
+      .modal {
+        width: 100%;
+        max-width: 440px;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 20px;
+      }
+      .modal h2 { margin: 0 0 4px; font-size: 16px; }
+      .modal p.hint { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
+      .field { margin-bottom: 12px; }
+      .field label { display: block; margin-bottom: 4px; font-size: 12px; color: var(--muted); }
+      .field input {
+        width: 100%;
+        font: inherit;
+        color: var(--text);
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 7px 10px;
+      }
+      .field input:focus { outline: none; border-color: var(--accent); }
+      .modal .error {
+        color: var(--error);
+        font-size: 12px;
+        margin: 0 0 12px;
+        min-height: 0;
+      }
+      .modal-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        margin-top: 16px;
+      }
+      .modal-actions .spacer { margin-right: auto; }
+      button:disabled { opacity: 0.55; cursor: default; }
     </style>
   </head>
   <body>
     <header>
       <span class="title">Samsung TV Control<small>log</small></span>
+      <span class="status" id="status"><span class="dot"></span><span id="statusText">Checking…</span></span>
+      <button id="loginBtn">Sign in</button>
       <button id="wake" class="primary">Wake TV → PC</button>
       <button id="off">TV off + sleep</button>
       <button id="clear">Clear</button>
     </header>
+
+    <div class="overlay" id="overlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <h2 id="modalTitle">Connect SmartThings</h2>
+        <p class="hint">
+          Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then click
+          Sign in — a window opens to approve access and tokens are stored automatically.
+        </p>
+        <div class="field">
+          <label for="clientId">Client ID</label>
+          <input id="clientId" type="text" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="clientSecret">Client Secret</label>
+          <input id="clientSecret" type="password" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="field">
+          <label for="redirectUri">Redirect URI</label>
+          <input id="redirectUri" type="text" autocomplete="off" spellcheck="false" />
+        </div>
+        <p class="error" id="modalError"></p>
+        <div class="modal-actions">
+          <button id="logoutBtn" class="spacer">Sign out</button>
+          <button id="cancelBtn">Cancel</button>
+          <button id="submitBtn" class="primary">Sign in</button>
+        </div>
+      </div>
+    </div>
     <div id="log" role="log" aria-live="polite"></div>
     <footer>
       <label><input type="checkbox" id="autoscroll" checked /> Auto-scroll</label>
@@ -135,6 +232,88 @@
         api.clearHistory();
         reset();
       });
+
+      // --- Auth UI ------------------------------------------------------------
+      const statusEl = document.getElementById("status");
+      const statusTextEl = document.getElementById("statusText");
+      const loginBtn = document.getElementById("loginBtn");
+      const overlay = document.getElementById("overlay");
+      const clientIdEl = document.getElementById("clientId");
+      const clientSecretEl = document.getElementById("clientSecret");
+      const redirectUriEl = document.getElementById("redirectUri");
+      const errorEl = document.getElementById("modalError");
+      const submitBtn = document.getElementById("submitBtn");
+      const cancelBtn = document.getElementById("cancelBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
+
+      function renderStatus(s) {
+        statusEl.className = "status " + (s.authorized ? "ok" : "off");
+        statusTextEl.textContent = s.authorized
+          ? "Signed in"
+          : s.hasClient
+          ? "Not authorized"
+          : "Not connected";
+        loginBtn.textContent = s.authorized ? "Account" : "Sign in";
+        logoutBtn.style.display = s.hasClient || s.authorized ? "" : "none";
+      }
+
+      async function refreshStatus() {
+        renderStatus(await api.authStatus());
+      }
+
+      async function openModal() {
+        const s = await api.authStatus();
+        clientIdEl.value = s.clientId;
+        clientSecretEl.value = s.clientSecret;
+        redirectUriEl.value = s.redirectUri;
+        errorEl.textContent = "";
+        logoutBtn.style.display = s.hasClient || s.authorized ? "" : "none";
+        overlay.classList.add("open");
+        clientIdEl.focus();
+      }
+
+      function closeModal() {
+        overlay.classList.remove("open");
+      }
+
+      function setBusy(busy) {
+        submitBtn.disabled = busy;
+        cancelBtn.disabled = busy;
+        logoutBtn.disabled = busy;
+        submitBtn.textContent = busy ? "Waiting for approval…" : "Sign in";
+      }
+
+      loginBtn.addEventListener("click", openModal);
+      cancelBtn.addEventListener("click", closeModal);
+      overlay.addEventListener("click", (e) => {
+        if (e.target === overlay) closeModal();
+      });
+
+      submitBtn.addEventListener("click", async () => {
+        errorEl.textContent = "";
+        setBusy(true);
+        const res = await api.login({
+          clientId: clientIdEl.value,
+          clientSecret: clientSecretEl.value,
+          redirectUri: redirectUriEl.value,
+        });
+        setBusy(false);
+        if (res.ok) {
+          closeModal();
+          await refreshStatus();
+        } else {
+          errorEl.textContent = res.error;
+        }
+      });
+
+      logoutBtn.addEventListener("click", async () => {
+        await api.logout();
+        clientSecretEl.value = "";
+        await refreshStatus();
+        closeModal();
+      });
+
+      refreshStatus();
     </script>
   </body>
 </html>

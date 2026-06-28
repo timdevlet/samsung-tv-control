@@ -8,7 +8,7 @@
 // `uiohook-napi` and `electron` itself stay external (required at runtime, not inlined).
 
 import esbuild from "esbuild";
-import { mkdir, copyFile, writeFile } from "node:fs/promises";
+import { mkdir, copyFile, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import zlib from "node:zlib";
 import path from "node:path";
@@ -34,7 +34,7 @@ const tsResolve = {
   },
 };
 
-async function bundle(entry, outfile, extraExternal = []) {
+async function bundle(entry, outfile, { extraExternal = [], injectImportMeta = true } = {}) {
   await esbuild.build({
     entryPoints: [path.join(root, entry)],
     outfile: path.join(out, outfile),
@@ -47,10 +47,17 @@ async function bundle(entry, outfile, extraExternal = []) {
     // bundled — both must remain require()d at runtime.
     external: ["electron", "uiohook-napi", ...extraExternal],
     plugins: [tsResolve],
-    // The sources compute __dirname from import.meta.url (valid ESM under tsx). In a CJS bundle
-    // import.meta is empty, so map it to a real file URL derived from the bundle's __filename.
-    banner: { js: "const import_meta_url = require('url').pathToFileURL(__filename).href;" },
-    define: { "import.meta.url": "import_meta_url" },
+    // The main/daemon sources compute __dirname from import.meta.url (valid ESM under tsx). In a
+    // CJS bundle import.meta is empty, so map it to a real file URL derived from __filename. This
+    // banner must NOT go into the preload bundle: preload runs in Electron's sandbox where Node
+    // globals like __filename are undefined, so the banner would throw "__filename is not defined"
+    // and the whole preload (and thus window.tvAPI) would fail to load.
+    ...(injectImportMeta
+      ? {
+          banner: { js: "const import_meta_url = require('url').pathToFileURL(__filename).href;" },
+          define: { "import.meta.url": "import_meta_url" },
+        }
+      : {}),
     logLevel: "info",
   });
 }
@@ -119,37 +126,116 @@ function encodeICO(png, size) {
   return Buffer.concat([header, entry, png]);
 }
 
-// Draw the app glyph: a rounded blue tile with a white TV/monitor on a stand.
-function drawIcon(size) {
-  const px = Buffer.alloc(size * size * 4); // transparent
-  const set = (x, y, r, g, b, a = 255) => {
-    if (x < 0 || y < 0 || x >= size || y >= size) return;
-    const i = (y * size + x) * 4;
-    px[i] = r;
-    px[i + 1] = g;
-    px[i + 2] = b;
-    px[i + 3] = a;
-  };
-  const inRoundRect = (x, y, x0, y0, x1, y1, r) => {
-    if (x < x0 || y < y0 || x > x1 || y > y1) return false;
-    const cx = Math.min(Math.max(x, x0 + r), x1 - r);
-    const cy = Math.min(Math.max(y, y0 + r), y1 - r);
-    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
-  };
-  const s = (f) => Math.round(f * size);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      // background tile
-      if (inRoundRect(x, y, s(0.05), s(0.05), s(0.95), s(0.95), s(0.22))) set(x, y, 37, 99, 235);
-      // screen
-      if (inRoundRect(x, y, s(0.2), s(0.24), s(0.8), s(0.62), s(0.05))) set(x, y, 246, 248, 250);
-      // neck
-      if (x >= s(0.45) && x <= s(0.55) && y >= s(0.62) && y <= s(0.72)) set(x, y, 246, 248, 250);
-      // stand base
-      if (inRoundRect(x, y, s(0.34), s(0.72), s(0.66), s(0.78), s(0.02))) set(x, y, 246, 248, 250);
+// --- minimal PNG decoder + area-average downscaler (no image deps) ---------------------------
+// Decode an 8-bit, non-interlaced PNG (color types 0/2/3/4/6) to a flat RGBA buffer. Enough to
+// read the hand-authored source icon; not a general-purpose decoder.
+function decodePNG(buf) {
+  let pos = 8; // skip the 8-byte signature
+  let width, height, bitDepth, colorType, interlace;
+  let palette = null;
+  let trns = null;
+  const idat = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.toString("ascii", pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + len);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "PLTE") palette = data;
+    else if (type === "tRNS") trns = data;
+    else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    pos += 12 + len; // 4 len + 4 type + len data + 4 crc
+  }
+  if (bitDepth !== 8) throw new Error(`unsupported PNG bit depth: ${bitDepth}`);
+  if (interlace !== 0) throw new Error("interlaced PNG not supported");
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colorType];
+  if (!channels) throw new Error(`unsupported PNG color type: ${colorType}`);
+
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const out = Buffer.alloc(height * stride);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    const cur = out.subarray(y * stride, y * stride + stride);
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? cur[i - channels] : 0; // byte to the left
+      const b = prev[i]; // byte above
+      const c = i >= channels ? prev[i - channels] : 0; // byte above-left
+      let v = line[i];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else if (filter !== 0) throw new Error(`unknown PNG filter: ${filter}`);
+      cur[i] = v & 0xff;
+    }
+    prev = cur;
+  }
+
+  // expand whatever color type we got into straight RGBA
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let p = 0; p < width * height; p++) {
+    let r, g, b, a = 255;
+    if (colorType === 2) [r, g, b] = [out[p * 3], out[p * 3 + 1], out[p * 3 + 2]];
+    else if (colorType === 6)
+      [r, g, b, a] = [out[p * 4], out[p * 4 + 1], out[p * 4 + 2], out[p * 4 + 3]];
+    else if (colorType === 0) r = g = b = out[p];
+    else if (colorType === 4) [r, g, b, a] = [out[p * 2], out[p * 2], out[p * 2], out[p * 2 + 1]];
+    else {
+      const idx = out[p]; // palette index
+      [r, g, b] = [palette[idx * 3], palette[idx * 3 + 1], palette[idx * 3 + 2]];
+      if (trns && idx < trns.length) a = trns[idx];
+    }
+    rgba.set([r, g, b, a], p * 4);
+  }
+  return { width, height, rgba };
+}
+
+// Downscale an RGBA buffer with box (area-average) sampling — best quality for shrinking a large
+// source to small icon sizes. Color is averaged premultiplied by alpha so transparent pixels
+// don't bleed their (arbitrary) color into the result.
+function resizeRGBA(src, sw, sh, size) {
+  const dst = Buffer.alloc(size * size * 4);
+  for (let dy = 0; dy < size; dy++) {
+    const sy0 = Math.floor((dy * sh) / size);
+    const sy1 = Math.max(sy0 + 1, Math.floor(((dy + 1) * sh) / size));
+    for (let dx = 0; dx < size; dx++) {
+      const sx0 = Math.floor((dx * sw) / size);
+      const sx1 = Math.max(sx0 + 1, Math.floor(((dx + 1) * sw) / size));
+      let r = 0, g = 0, b = 0, aSum = 0, n = 0;
+      for (let sy = sy0; sy < sy1; sy++) {
+        for (let sx = sx0; sx < sx1; sx++) {
+          const i = (sy * sw + sx) * 4;
+          const af = src[i + 3];
+          r += src[i] * af;
+          g += src[i + 1] * af;
+          b += src[i + 2] * af;
+          aSum += af;
+          n++;
+        }
+      }
+      const di = (dy * size + dx) * 4;
+      if (aSum > 0) {
+        dst[di] = Math.round(r / aSum);
+        dst[di + 1] = Math.round(g / aSum);
+        dst[di + 2] = Math.round(b / aSum);
+        dst[di + 3] = Math.round(aSum / n);
+      }
     }
   }
-  return px;
+  return dst;
 }
 
 // Draw a gray gamepad on a transparent background (used for the tray icon): a horizontal pill
@@ -202,11 +288,16 @@ async function generateIcons() {
   await mkdir(buildDir, { recursive: true });
   await mkdir(out, { recursive: true });
 
-  const png256 = encodePNG(256, drawIcon(256));
+  // App icon: resample the hand-authored source image down to each required size.
+  const src = decodePNG(await readFile(path.join(buildDir, "icon-source.png")));
+  const appIcon = (size) => encodePNG(size, resizeRGBA(src.rgba, src.width, src.height, size));
+
+  const png512 = appIcon(512); // electron-builder requires mac/linux icon >= 512x512
+  const png256 = appIcon(256);
   const tray32 = encodePNG(32, drawGamepad(32)); // gray gamepad for the tray
 
-  await writeFile(path.join(buildDir, "icon.png"), png256); // electron-builder mac/linux
-  await writeFile(path.join(buildDir, "icon.ico"), encodeICO(png256, 256)); // electron-builder win
+  await writeFile(path.join(buildDir, "icon.png"), png512); // electron-builder mac/linux
+  await writeFile(path.join(buildDir, "icon.ico"), encodeICO(png256, 256)); // electron-builder win (256 max)
   await writeFile(path.join(out, "icon.png"), png256); // BrowserWindow icon
   await writeFile(path.join(out, "tray.png"), tray32); // tray icon
 }
@@ -214,7 +305,9 @@ async function generateIcons() {
 // --- run -------------------------------------------------------------------------------------
 await generateIcons();
 await bundle("src/electron/main.ts", "main.cjs");
-await bundle("src/electron/preload.ts", "preload.cjs");
+// Preload runs sandboxed — no __filename — so skip the import.meta.url banner. It only uses
+// electron's contextBridge/ipcRenderer and never references import.meta.url.
+await bundle("src/electron/preload.ts", "preload.cjs", { injectImportMeta: false });
 await mkdir(path.join(out, "renderer"), { recursive: true });
 await copyFile(
   path.join(root, "src/electron/renderer/index.html"),

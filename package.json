@@ -41,6 +41,7 @@
   "build": {
     "appId": "com.timdevlet.samsung-tv-control",
     "productName": "Samsung TV Control",
+    "npmRebuild": false,
     "directories": {
       "output": "release",
       "buildResources": "build"

@@ -100,18 +100,38 @@ export async function startDaemon(): Promise<Daemon> {
     else if (matchHotkey(e, mods, "Q", PLATFORM)) void triggerOffAndSleep();
   };
 
+  // Starting the global keyboard hook can fail — most commonly on macOS when Accessibility
+  // permission hasn't been granted (uiohook-napi throws "Failed to enable access for assistive
+  // devices"). Treat that as non-fatal: the daemon still auto-wakes the TV on resume, still
+  // reconciles at boot, and the Electron tray/window buttons still work — only the global hotkeys
+  // are unavailable. Previously the throw escaped startDaemon() entirely, so nothing started and no
+  // logs were ever emitted (the Electron log window stayed empty). Log a clear remediation hint and
+  // carry on instead.
+  const noop = (): void => {};
+  async function startKeysSafely(): Promise<() => void> {
+    try {
+      return await startKeyListener(handleKey);
+    } catch (e) {
+      logError(`Global hotkeys unavailable: ${e instanceof Error ? e.message : String(e)}`);
+      if (isMac) {
+        log("  Grant Accessibility permission under System Settings → Privacy & Security → Accessibility, then restart.");
+      }
+      return noop;
+    }
+  }
+
   // macOS disables the low-level keyboard tap when the machine sleeps and never re-arms it on
   // wake, so the hotkeys go silent after a sleep/wake cycle. Tear the listener down and start a
   // fresh one to re-create the tap. Kept as a mutable ref so the shutdown handler always stops
   // the live listener.
-  let stopKeys = await startKeyListener(handleKey);
+  let stopKeys = await startKeysSafely();
   async function rearmKeys(): Promise<void> {
     try {
       stopKeys();
     } catch (e) {
       logError(`failed to stop key listener before re-arm: ${e instanceof Error ? e.message : String(e)}`);
     }
-    stopKeys = await startKeyListener(handleKey);
+    stopKeys = await startKeysSafely();
   }
 
   // If the daemon started right after the machine powered on (e.g. launched as a boot/login
