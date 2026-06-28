@@ -12,7 +12,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startDaemon, ON_COMBO_LABEL, OFF_COMBO_LABEL, type Daemon } from "../daemon-core.js";
 import { onLog, log, type LogEntry } from "../log.js";
-import { getAuthStatus, login as runLogin, logout as runLogout, type ClientCredentials } from "./auth.js";
+import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
+import { getSettings, saveSettings, type AppSettings } from "./settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,6 +35,9 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let daemon: Daemon | null = null;
 let quitting = false;
+// Mirrors config.minimizeToTrayOnClose; loaded once at startup and updated when Settings saves.
+// When false, closing the window quits the app instead of hiding to the tray.
+let minimizeToTrayOnClose = true;
 
 function pushHistory(entry: LogEntry): void {
   history.push(entry);
@@ -59,11 +63,16 @@ function createWindow(): BrowserWindow {
 
   void w.loadFile(path.join(__dirname, "renderer", "index.html"));
 
-  // Closing the window hides it to the tray instead of quitting — the daemon stays alive.
+  // Closing the window hides it to the tray (the daemon stays alive) when that preference is on;
+  // otherwise closing quits the app. The quitting flag lets the tray Quit / before-quit pass.
   w.on("close", (e) => {
-    if (!quitting) {
+    if (quitting) return;
+    if (minimizeToTrayOnClose) {
       e.preventDefault();
       w.hide();
+    } else {
+      quitting = true;
+      app.quit();
     }
   });
 
@@ -81,15 +90,28 @@ function sendLog(entry: LogEntry): void {
   if (win && !win.isDestroyed()) win.webContents.send("log", entry);
 }
 
+// Surface the window and tell the renderer to open the Settings modal.
+function openSettings(): void {
+  showWindow();
+  win?.webContents.send("open-settings");
+}
+
 function buildTray(): void {
-  const trayImg = nativeImage.createFromPath(path.join(__dirname, "tray.png"));
-  // The tray PNG is a solid-black silhouette on transparency. Marking it as a template image lets
-  // macOS recolor it to match the menu bar (white on dark) like the other system tray icons.
-  trayImg.setTemplateImage(true);
+  // Tray glyph (a switch/toggle) is generated at build time from one source — see
+  // renderSwitchIcon in scripts/build-electron.mjs. macOS loads the black silhouette and marks it
+  // a template image so the system recolors it to match the menu bar (white on dark, inverting on
+  // click). Windows ignores template images, so there we load the white silhouette directly — it
+  // shows white on the (typically dark) taskbar. Both have @2x retina variants auto-loaded by name.
+  const isMac = process.platform === "darwin";
+  const trayImg = nativeImage.createFromPath(
+    path.join(__dirname, isMac ? "tray.png" : "tray-white.png"),
+  );
+  if (isMac) trayImg.setTemplateImage(true);
   tray = new Tray(trayImg);
   tray.setToolTip("Samsung TV Control");
   const menu = Menu.buildFromTemplate([
     { label: "Show logs", click: () => showWindow() },
+    { label: "Settings…", click: () => openSettings() },
     { type: "separator" },
     { label: `Wake TV + switch to PC  (${ON_COMBO_LABEL})`, click: () => void daemon?.triggerOn() },
     { label: `TV off + sleep this PC  (${OFF_COMBO_LABEL})`, click: () => void daemon?.triggerOffAndSleep() },
@@ -107,6 +129,8 @@ async function start(): Promise<void> {
   // dark to match the window's black UI, rather than following the OS's light/dark setting.
   nativeTheme.themeSource = "dark";
   Menu.setApplicationMenu(null);
+  // Load the close-to-tray preference before the window can be closed.
+  minimizeToTrayOnClose = (await getSettings()).minimizeToTrayOnClose;
   buildTray();
   win = createWindow();
 
@@ -126,9 +150,12 @@ async function start(): Promise<void> {
   // Auth: the GUI equivalent of `npm run login` / `npm run reset`. The daemon reloads config on
   // every action, so newly-saved tokens take effect on the next Wake without a restart.
   ipcMain.handle("auth:status", () => getAuthStatus());
-  ipcMain.handle("auth:login", async (_e, creds: ClientCredentials) => {
+  ipcMain.handle("auth:login", async () => {
     try {
-      await runLogin(win, creds);
+      const result = await runLogin(win);
+      if (result === LOGIN_CANCELLED) {
+        return { ok: false as const, cancelled: true as const };
+      }
       log("\n✅ Signed in to SmartThings — tokens saved and will refresh automatically.");
       return { ok: true as const };
     } catch (err) {
@@ -139,6 +166,16 @@ async function start(): Promise<void> {
   ipcMain.handle("auth:logout", async () => {
     await runLogout();
     log("Signed out — cleared stored SmartThings credentials.");
+    return { ok: true as const };
+  });
+
+  // Settings: edit user preferences (pcInput, close-to-tray) without hand-editing the config file.
+  // The daemon reloads config per action, so a new pcInput applies on the next Wake; the tray flag
+  // is mirrored here so it takes effect on the next close without a restart.
+  ipcMain.handle("settings:get", () => getSettings());
+  ipcMain.handle("settings:save", async (_e, partial: Partial<AppSettings>) => {
+    await saveSettings(partial);
+    minimizeToTrayOnClose = (await getSettings()).minimizeToTrayOnClose;
     return { ok: true as const };
   });
 

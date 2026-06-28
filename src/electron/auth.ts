@@ -5,26 +5,16 @@
 // token exchange, exactly as the CLI does, so both paths write the same smartthings-config.json.
 
 import { BrowserWindow } from "electron";
-import { loadConfig, saveConfig, resetConfig } from "../config.js";
+import { loadConfig, resetConfig } from "../config.js";
 import { hasOAuthClient } from "../domain/oauth.js";
 import { authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "../api/oauth.js";
 
 export interface AuthStatus {
-  // An OAuth client (clientId + clientSecret) is configured.
+  // An OAuth client (clientId + clientSecret) is configured. The client fields themselves now
+  // live in Settings (settings.ts), so status only reports whether sign-in is possible/done.
   hasClient: boolean;
   // We hold a refresh token, i.e. login completed at least once.
   authorized: boolean;
-  // Echo the saved client fields so the renderer can pre-fill the form (secret included so the
-  // user can see/edit it; this is a local single-user desktop app reading its own config file).
-  clientId: string;
-  clientSecret: string;
-  redirectUri: string;
-}
-
-export interface ClientCredentials {
-  clientId: string;
-  clientSecret: string;
-  redirectUri?: string;
 }
 
 export async function getAuthStatus(): Promise<AuthStatus> {
@@ -32,9 +22,6 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   return {
     hasClient: hasOAuthClient(config),
     authorized: Boolean(config.refreshToken),
-    clientId: config.clientId ?? "",
-    clientSecret: config.clientSecret ?? "",
-    redirectUri: config.redirectUri ?? DEFAULT_REDIRECT_URI,
   };
 }
 
@@ -62,32 +49,35 @@ function extractCode(navigated: string, redirectUri: string): { code?: string; e
   return { code, error };
 }
 
-// Run the full login: save the client creds, open the approval window, capture the code, exchange
-// it for tokens. Resolves once tokens are saved; rejects on denial, timeout, or a closed window.
-export async function login(parent: BrowserWindow | null, creds: ClientCredentials): Promise<void> {
-  const clientId = creds.clientId.trim();
-  const clientSecret = creds.clientSecret.trim();
-  if (!clientId || !clientSecret) {
-    throw new Error("Both Client ID and Client Secret are required.");
-  }
+// Sentinel returned (not thrown) when the user closes the popup to abort the flow — closing the
+// window is a normal "never mind", not an error the caller should surface as a failure.
+export const LOGIN_CANCELLED = Symbol("login-cancelled");
 
-  // Persist the client fields first so they survive even if the user cancels the approval, and so
-  // authorizeUrl() below reads them back from the same config the rest of the app uses.
+// Run the OAuth approval: open the SmartThings window, capture the code, exchange it for tokens.
+// The client (clientId/clientSecret/redirectUri) must already be saved via Settings; resolves once
+// tokens are saved (or with LOGIN_CANCELLED if the user closed the window); rejects if the client
+// is missing, on denial, or on timeout.
+export async function login(parent: BrowserWindow | null): Promise<void | typeof LOGIN_CANCELLED> {
   const config = await loadConfig();
-  config.clientId = clientId;
-  config.clientSecret = clientSecret;
-  if (creds.redirectUri?.trim()) config.redirectUri = creds.redirectUri.trim();
-  await saveConfig(config);
+  if (!hasOAuthClient(config)) {
+    throw new Error("Configure your SmartThings client in Settings first.");
+  }
 
   const redirectUri = config.redirectUri ?? DEFAULT_REDIRECT_URI;
 
   const code = await captureCode(parent, authorizeUrl(config), redirectUri);
+  if (code === LOGIN_CANCELLED) return LOGIN_CANCELLED;
   await exchangeCode(config, code);
 }
 
-// Open the SmartThings approval page and resolve with the `code` from the redirect.
-function captureCode(parent: BrowserWindow | null, startUrl: string, redirectUri: string): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+// Open the SmartThings approval page and resolve with the `code` from the redirect, or with
+// LOGIN_CANCELLED if the user closes the window to abort.
+function captureCode(
+  parent: BrowserWindow | null,
+  startUrl: string,
+  redirectUri: string,
+): Promise<string | typeof LOGIN_CANCELLED> {
+  return new Promise<string | typeof LOGIN_CANCELLED>((resolve, reject) => {
     const authWin = new BrowserWindow({
       width: 520,
       height: 720,
@@ -107,6 +97,12 @@ function captureCode(parent: BrowserWindow | null, startUrl: string, redirectUri
       fn();
     };
 
+    // A "Cancel" button in the window's own menu/escape isn't available on a bare BrowserWindow,
+    // so Escape closes the window — which onClosed turns into a clean cancellation.
+    authWin.webContents.on("before-input-event", (_e, input) => {
+      if (input.type === "keyDown" && input.key === "Escape" && !authWin.isDestroyed()) authWin.close();
+    });
+
     const onNavigate = (url: string): void => {
       const hit = extractCode(url, redirectUri);
       if (!hit) return;
@@ -115,9 +111,11 @@ function captureCode(parent: BrowserWindow | null, startUrl: string, redirectUri
     };
 
     const onClosed = (): void => {
+      // The user closed the window to back out of the flow — resolve as a cancellation rather than
+      // rejecting, so the renderer can quietly return to "Not authorized" without an error.
       if (!settled) {
         settled = true;
-        reject(new Error("Login window was closed before authorization completed."));
+        resolve(LOGIN_CANCELLED);
       }
     };
 

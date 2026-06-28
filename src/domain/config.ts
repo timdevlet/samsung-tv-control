@@ -30,10 +30,16 @@ export interface TVConfig {
   // Target input the PC is on. Matched against the TV's supported-input map by
   // id ("HDMI3") first, then by label ("PC"). Default "HDMI2".
   pcInput: string;
+
+  // App behavior
+  // When true (default), closing the window hides it to the tray and the daemon
+  // keeps running. When false, closing the window quits the app.
+  minimizeToTrayOnClose?: boolean;
 }
 
 const DEFAULTS: TVConfig = {
   pcInput: "HDMI2",
+  minimizeToTrayOnClose: true,
 };
 
 // Merge parsed config over defaults and migrate the legacy "secret" key.

@@ -127,7 +127,7 @@ describe("OAuth decisions", () => {
 
 describe("config policy", () => {
   it("merges over defaults", () => {
-    expect(mergeConfig({ clientId: "x" })).toEqual({ pcInput: "HDMI2", clientId: "x" });
+    expect(mergeConfig({ clientId: "x" })).toEqual({ pcInput: "HDMI2", minimizeToTrayOnClose: true, clientId: "x" });
   });
   it("migrates legacy secret -> clientSecret", () => {
     expect(mergeConfig({ secret: "s" }).clientSecret).toBe("s");
@@ -136,7 +136,7 @@ describe("config policy", () => {
     expect(mergeConfig({ secret: "s", clientSecret: "real" }).clientSecret).toBe("real");
   });
   it("defaultConfig is defaults only", () => {
-    expect(defaultConfig()).toEqual({ pcInput: "HDMI2" });
+    expect(defaultConfig()).toEqual({ pcInput: "HDMI2", minimizeToTrayOnClose: true });
   });
   it("resolveStaticToken prefers env over config", () => {
     expect(resolveStaticToken({ pcInput: "x", token: "cfg" }, "  env ")).toBe("env");

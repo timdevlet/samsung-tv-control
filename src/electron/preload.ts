@@ -4,9 +4,10 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { LogEntry } from "../log.js";
-import type { AuthStatus, ClientCredentials } from "./auth.js";
+import type { AuthStatus } from "./auth.js";
+import type { AppSettings } from "./settings.js";
 
-type AuthResult = { ok: true } | { ok: false; error: string };
+type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
 
 contextBridge.exposeInMainWorld("tvAPI", {
   // Subscribe to live log lines. Returns an unsubscribe function.
@@ -22,6 +23,16 @@ contextBridge.exposeInMainWorld("tvAPI", {
   tvOffSleep: (): void => ipcRenderer.send("action:off"),
   // Auth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
-  login: (creds: ClientCredentials): Promise<AuthResult> => ipcRenderer.invoke("auth:login", creds),
+  login: (): Promise<AuthResult> => ipcRenderer.invoke("auth:login"),
   logout: (): Promise<AuthResult> => ipcRenderer.invoke("auth:logout"),
+  // Settings
+  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
+  saveSettings: (partial: Partial<AppSettings>): Promise<AuthResult> =>
+    ipcRenderer.invoke("settings:save", partial),
+  // Open the Settings modal when asked from the tray. Returns an unsubscribe function.
+  onOpenSettings: (cb: () => void): (() => void) => {
+    const handler = (): void => cb();
+    ipcRenderer.on("open-settings", handler);
+    return () => ipcRenderer.off("open-settings", handler);
+  },
 });

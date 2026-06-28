@@ -121,6 +121,19 @@
         border-radius: 10px;
         padding: 20px;
       }
+      .modal-header { display: flex; align-items: flex-start; gap: 8px; }
+      .modal-header h2 { margin: 0 0 4px; font-size: 16px; flex: 1; }
+      .modal .close {
+        flex: none;
+        margin: -4px -4px 0 0;
+        padding: 4px 8px;
+        font-size: 18px;
+        line-height: 1;
+        background: none;
+        border: none;
+        color: var(--muted);
+      }
+      .modal .close:hover { background: #30363d; color: var(--text); }
       .modal h2 { margin: 0 0 4px; font-size: 16px; }
       .modal p.hint { margin: 0 0 16px; color: var(--muted); font-size: 12px; }
       .field { margin-bottom: 12px; }
@@ -149,6 +162,10 @@
       }
       .modal-actions .spacer { margin-right: auto; }
       button:disabled { opacity: 0.55; cursor: default; }
+      /* Checkbox row inside a modal field */
+      .field.check { display: flex; align-items: center; gap: 8px; }
+      .field.check label { margin: 0; color: var(--text); cursor: pointer; }
+      .field.check input { width: auto; }
     </style>
   </head>
   <body>
@@ -156,17 +173,22 @@
       <span class="title">Samsung TV Control<small>log</small></span>
       <span class="status" id="status"><span class="dot"></span><span id="statusText">Checking…</span></span>
       <button id="loginBtn">Sign in</button>
+      <button id="settingsBtn">Settings</button>
       <button id="wake" class="primary">Wake TV → PC</button>
       <button id="off">TV off + sleep</button>
       <button id="clear">Clear</button>
     </header>
 
-    <div class="overlay" id="overlay">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-        <h2 id="modalTitle">Connect SmartThings</h2>
+    <div class="overlay" id="settingsOverlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <div class="modal-header">
+          <h2 id="settingsTitle">Settings</h2>
+          <button id="settingsCloseBtn" class="close" aria-label="Close">&times;</button>
+        </div>
         <p class="hint">
-          Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then click
-          Sign in — a window opens to approve access and tokens are stored automatically.
+          Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use
+          Sign in (in the toolbar) to approve access — tokens are stored automatically. The PC
+          input is matched against the TV's inputs by id or label.
         </p>
         <div class="field">
           <label for="clientId">Client ID</label>
@@ -180,11 +202,19 @@
           <label for="redirectUri">Redirect URI</label>
           <input id="redirectUri" type="text" autocomplete="off" spellcheck="false" />
         </div>
-        <p class="error" id="modalError"></p>
+        <div class="field">
+          <label for="pcInput">PC input</label>
+          <input id="pcInput" type="text" autocomplete="off" spellcheck="false" placeholder="HDMI2" />
+        </div>
+        <div class="field check">
+          <input id="minimizeToTray" type="checkbox" />
+          <label for="minimizeToTray">Hide to tray on close (keep running in the background)</label>
+        </div>
+        <p class="error" id="settingsError"></p>
         <div class="modal-actions">
           <button id="logoutBtn" class="spacer">Sign out</button>
-          <button id="cancelBtn">Cancel</button>
-          <button id="submitBtn" class="primary">Sign in</button>
+          <button id="settingsCancelBtn">Cancel</button>
+          <button id="settingsSaveBtn" class="primary">Save</button>
         </div>
       </div>
     </div>
@@ -268,17 +298,11 @@
       });
 
       // --- Auth UI ------------------------------------------------------------
+      // The OAuth client fields now live in Settings. "Sign in" is OAuth-only: if no client is
+      // configured yet it routes the user to Settings; otherwise it opens the approval window.
       const statusEl = document.getElementById("status");
       const statusTextEl = document.getElementById("statusText");
       const loginBtn = document.getElementById("loginBtn");
-      const overlay = document.getElementById("overlay");
-      const clientIdEl = document.getElementById("clientId");
-      const clientSecretEl = document.getElementById("clientSecret");
-      const redirectUriEl = document.getElementById("redirectUri");
-      const errorEl = document.getElementById("modalError");
-      const submitBtn = document.getElementById("submitBtn");
-      const cancelBtn = document.getElementById("cancelBtn");
-      const logoutBtn = document.getElementById("logoutBtn");
 
       function renderStatus(s) {
         statusEl.className = "status " + (s.authorized ? "ok" : "off");
@@ -288,63 +312,104 @@
           ? "Not authorized"
           : "Not connected";
         loginBtn.textContent = s.authorized ? "Account" : "Sign in";
-        logoutBtn.style.display = s.hasClient || s.authorized ? "" : "none";
       }
 
       async function refreshStatus() {
         renderStatus(await api.authStatus());
       }
 
-      async function openModal() {
+      function setBusy(busy) {
+        loginBtn.disabled = busy;
+        loginBtn.textContent = busy ? "Waiting for approval…" : "Sign in";
+      }
+
+      loginBtn.addEventListener("click", async () => {
         const s = await api.authStatus();
-        clientIdEl.value = s.clientId;
-        clientSecretEl.value = s.clientSecret;
-        redirectUriEl.value = s.redirectUri;
-        errorEl.textContent = "";
-        logoutBtn.style.display = s.hasClient || s.authorized ? "" : "none";
-        overlay.classList.add("open");
+        // No client configured yet (or already signed in) → open Settings to manage it.
+        if (!s.hasClient || s.authorized) {
+          openSettings();
+          if (!s.hasClient) clientIdEl.focus();
+          return;
+        }
+        setBusy(true);
+        const res = await api.login();
+        setBusy(false);
+        await refreshStatus();
+        // Closing the popup to abort is not a failure — leave the status as-is.
+        if (!res.ok && !res.cancelled && res.error) statusTextEl.textContent = res.error;
+      });
+
+      // --- Settings UI --------------------------------------------------------
+      const settingsBtn = document.getElementById("settingsBtn");
+      const settingsOverlay = document.getElementById("settingsOverlay");
+      const clientIdEl = document.getElementById("clientId");
+      const clientSecretEl = document.getElementById("clientSecret");
+      const redirectUriEl = document.getElementById("redirectUri");
+      const pcInputEl = document.getElementById("pcInput");
+      const minimizeToTrayEl = document.getElementById("minimizeToTray");
+      const settingsErrorEl = document.getElementById("settingsError");
+      const settingsSaveBtn = document.getElementById("settingsSaveBtn");
+      const settingsCancelBtn = document.getElementById("settingsCancelBtn");
+      const settingsCloseBtn = document.getElementById("settingsCloseBtn");
+      const logoutBtn = document.getElementById("logoutBtn");
+
+      async function openSettings() {
+        const s = await api.getSettings();
+        clientIdEl.value = s.clientId || "";
+        clientSecretEl.value = s.clientSecret || "";
+        redirectUriEl.value = s.redirectUri || "";
+        pcInputEl.value = s.pcInput || "";
+        minimizeToTrayEl.checked = s.minimizeToTrayOnClose;
+        settingsErrorEl.textContent = "";
+        const status = await api.authStatus();
+        logoutBtn.style.display = status.hasClient || status.authorized ? "" : "none";
+        settingsOverlay.classList.add("open");
         clientIdEl.focus();
       }
 
-      function closeModal() {
-        overlay.classList.remove("open");
+      function closeSettings() {
+        settingsOverlay.classList.remove("open");
       }
 
-      function setBusy(busy) {
-        submitBtn.disabled = busy;
-        cancelBtn.disabled = busy;
-        logoutBtn.disabled = busy;
-        submitBtn.textContent = busy ? "Waiting for approval…" : "Sign in";
-      }
-
-      loginBtn.addEventListener("click", openModal);
-      cancelBtn.addEventListener("click", closeModal);
-      overlay.addEventListener("click", (e) => {
-        if (e.target === overlay) closeModal();
+      settingsBtn.addEventListener("click", openSettings);
+      api.onOpenSettings(openSettings);
+      settingsCancelBtn.addEventListener("click", closeSettings);
+      settingsCloseBtn.addEventListener("click", closeSettings);
+      settingsOverlay.addEventListener("click", (e) => {
+        if (e.target === settingsOverlay) closeSettings();
       });
 
-      submitBtn.addEventListener("click", async () => {
-        errorEl.textContent = "";
-        setBusy(true);
-        const res = await api.login({
-          clientId: clientIdEl.value,
-          clientSecret: clientSecretEl.value,
-          redirectUri: redirectUriEl.value,
-        });
-        setBusy(false);
-        if (res.ok) {
-          closeModal();
-          await refreshStatus();
-        } else {
-          errorEl.textContent = res.error;
+      settingsSaveBtn.addEventListener("click", async () => {
+        settingsErrorEl.textContent = "";
+        const pcInput = pcInputEl.value.trim();
+        if (!pcInput) {
+          settingsErrorEl.textContent = "PC input can't be empty.";
+          return;
         }
+        settingsSaveBtn.disabled = true;
+        settingsCancelBtn.disabled = true;
+        const res = await api.saveSettings({
+          clientId: clientIdEl.value.trim(),
+          clientSecret: clientSecretEl.value.trim(),
+          redirectUri: redirectUriEl.value.trim(),
+          pcInput,
+          minimizeToTrayOnClose: minimizeToTrayEl.checked,
+        });
+        settingsSaveBtn.disabled = false;
+        settingsCancelBtn.disabled = false;
+        if (res && res.ok === false) {
+          settingsErrorEl.textContent = res.error || "Failed to save settings.";
+          return;
+        }
+        await refreshStatus();
+        closeSettings();
       });
 
       logoutBtn.addEventListener("click", async () => {
         await api.logout();
         clientSecretEl.value = "";
         await refreshStatus();
-        closeModal();
+        closeSettings();
       });
 
       refreshStatus();
