@@ -238,52 +238,6 @@ function resizeRGBA(src, sw, sh, size) {
   return dst;
 }
 
-// Draw a gray gamepad on a transparent background (used for the tray icon): a horizontal pill
-// body with a D-pad on the left and a diamond of four buttons on the right, in a darker gray.
-function drawGamepad(size) {
-  const px = Buffer.alloc(size * size * 4); // transparent
-  const set = (x, y, r, g, b, a = 255) => {
-    if (x < 0 || y < 0 || x >= size || y >= size) return;
-    const i = (y * size + x) * 4;
-    px[i] = r;
-    px[i + 1] = g;
-    px[i + 2] = b;
-    px[i + 3] = a;
-  };
-  const s = (f) => f * size;
-  const inRoundRect = (x, y, x0, y0, x1, y1, r) => {
-    if (x < x0 || y < y0 || x > x1 || y > y1) return false;
-    const cx = Math.min(Math.max(x, x0 + r), x1 - r);
-    const cy = Math.min(Math.max(y, y0 + r), y1 - r);
-    return (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
-  };
-  const inCircle = (x, y, cx, cy, r) => (x - cx) ** 2 + (y - cy) ** 2 <= r * r;
-
-  const BODY = [156, 163, 175]; // gray
-  const DETAIL = [55, 65, 81]; // darker gray for the controls
-  const rB = s(0.05); // button radius
-
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      // controller body: a horizontal pill
-      if (inRoundRect(x, y, s(0.08), s(0.32), s(0.92), s(0.68), s(0.18))) set(x, y, ...BODY);
-      // D-pad (left): a plus made of two crossing bars
-      const vBar = x >= s(0.22) && x <= s(0.30) && y >= s(0.4) && y <= s(0.6);
-      const hBar = x >= s(0.16) && x <= s(0.36) && y >= s(0.46) && y <= s(0.54);
-      if (vBar || hBar) set(x, y, ...DETAIL);
-      // buttons (right): a diamond of four dots around (0.72, 0.50)
-      if (
-        inCircle(x, y, s(0.72), s(0.42), rB) ||
-        inCircle(x, y, s(0.72), s(0.58), rB) ||
-        inCircle(x, y, s(0.64), s(0.5), rB) ||
-        inCircle(x, y, s(0.8), s(0.5), rB)
-      )
-        set(x, y, ...DETAIL);
-    }
-  }
-  return px;
-}
-
 async function generateIcons() {
   await mkdir(buildDir, { recursive: true });
   await mkdir(out, { recursive: true });
@@ -294,12 +248,12 @@ async function generateIcons() {
 
   const png512 = appIcon(512); // electron-builder requires mac/linux icon >= 512x512
   const png256 = appIcon(256);
-  const tray32 = encodePNG(32, drawGamepad(32)); // gray gamepad for the tray
 
   await writeFile(path.join(buildDir, "icon.png"), png512); // electron-builder mac/linux
   await writeFile(path.join(buildDir, "icon.ico"), encodeICO(png256, 256)); // electron-builder win (256 max)
   await writeFile(path.join(out, "icon.png"), png256); // BrowserWindow icon
-  await writeFile(path.join(out, "tray.png"), tray32); // tray icon
+  // Tray icon is a hand-authored, committed asset — copy it through as-is rather than regenerating.
+  await copyFile(path.join(root, "tray.png"), path.join(out, "tray.png"));
 }
 
 // --- run -------------------------------------------------------------------------------------

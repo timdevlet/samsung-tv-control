@@ -82,7 +82,11 @@ function sendLog(entry: LogEntry): void {
 }
 
 function buildTray(): void {
-  tray = new Tray(nativeImage.createFromPath(path.join(__dirname, "tray.png")));
+  const trayImg = nativeImage.createFromPath(path.join(__dirname, "tray.png"));
+  // The tray PNG is a solid-black silhouette on transparency. Marking it as a template image lets
+  // macOS recolor it to match the menu bar (white on dark) like the other system tray icons.
+  trayImg.setTemplateImage(true);
+  tray = new Tray(trayImg);
   tray.setToolTip("Samsung TV Control");
   const menu = Menu.buildFromTemplate([
     { label: "Show logs", click: () => showWindow() },
