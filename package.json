@@ -29,11 +29,11 @@
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.0",
+    "@electron/rebuild": "^4.0.6",
     "@types/node": "^22.10.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.1.8",
-    "esbuild": "^0.24.0",
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.9"
@@ -68,11 +68,15 @@
       "shortcutName": "Samsung TV Control"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "icon": "build/icon.png"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "icon": "build/icon.png"
     }
   }

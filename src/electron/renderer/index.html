@@ -47,6 +47,8 @@
       button:hover { background: #30363d; }
       button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
       button.primary:hover { background: var(--accent-hover); }
+      button.danger { background: var(--error); border-color: var(--error); color: #fff; }
+      button.danger:hover { background: #ff6a5f; border-color: #ff6a5f; }
       #log {
         flex: 1;
         overflow-y: auto;
@@ -116,6 +118,8 @@
       .modal {
         width: 100%;
         max-width: 440px;
+        max-height: 100%;
+        overflow-y: auto;
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -161,11 +165,63 @@
         margin-top: 16px;
       }
       .modal-actions .spacer { margin-right: auto; }
+      /* Danger zone — destructive actions, set apart from normal settings */
+      .danger-zone {
+        margin-top: 20px;
+        padding: 14px;
+        border: 1px solid var(--error);
+        border-radius: 8px;
+      }
+      .danger-zone h3 {
+        margin: 0 0 4px;
+        font-size: 13px;
+        color: var(--error);
+      }
+      .danger-zone p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
       button:disabled { opacity: 0.55; cursor: default; }
-      /* Checkbox row inside a modal field */
+      /* Toggle row inside a modal field — label left, macOS-style switch right */
       .field.check { display: flex; align-items: center; gap: 8px; }
-      .field.check label { margin: 0; color: var(--text); cursor: pointer; }
-      .field.check input { width: auto; }
+      .field.check label { margin: 0; flex: 1; color: var(--text); cursor: pointer; }
+      /* macOS-style toggle switch */
+      .switch {
+        position: relative;
+        flex: none;
+        width: 38px;
+        height: 22px;
+        cursor: pointer;
+      }
+      .switch input {
+        position: absolute;
+        z-index: 1;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+      }
+      .switch .track {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: var(--border);
+        border-radius: 11px;
+        transition: background 0.15s ease;
+      }
+      .switch .track::before {
+        content: "";
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 18px;
+        height: 18px;
+        background: #fff;
+        border-radius: 50%;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+        transition: transform 0.15s ease;
+      }
+      .switch input:checked + .track { background: #3fb950; }
+      .switch input:checked + .track::before { transform: translateX(16px); }
+      .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
     </style>
   </head>
   <body>
@@ -207,14 +263,21 @@
           <input id="pcInput" type="text" autocomplete="off" spellcheck="false" placeholder="HDMI2" />
         </div>
         <div class="field check">
-          <input id="minimizeToTray" type="checkbox" />
+          <span class="switch">
+            <input id="minimizeToTray" type="checkbox" />
+            <span class="track"></span>
+          </span>
           <label for="minimizeToTray">Hide to tray on close (keep running in the background)</label>
         </div>
         <p class="error" id="settingsError"></p>
         <div class="modal-actions">
-          <button id="logoutBtn" class="spacer">Sign out</button>
           <button id="settingsCancelBtn">Cancel</button>
           <button id="settingsSaveBtn" class="primary">Save</button>
+        </div>
+        <div class="danger-zone" id="dangerZone">
+          <h3>Danger zone</h3>
+          <p>Sign out to clear stored tokens from this device.</p>
+          <button id="logoutBtn" class="danger">Sign out</button>
         </div>
       </div>
     </div>
@@ -352,6 +415,7 @@
       const settingsCancelBtn = document.getElementById("settingsCancelBtn");
       const settingsCloseBtn = document.getElementById("settingsCloseBtn");
       const logoutBtn = document.getElementById("logoutBtn");
+      const dangerZone = document.getElementById("dangerZone");
 
       async function openSettings() {
         const s = await api.getSettings();
@@ -362,7 +426,8 @@
         minimizeToTrayEl.checked = s.minimizeToTrayOnClose;
         settingsErrorEl.textContent = "";
         const status = await api.authStatus();
-        logoutBtn.style.display = status.hasClient || status.authorized ? "" : "none";
+        // Sign out only makes sense when actually signed in.
+        dangerZone.style.display = status.authorized ? "" : "none";
         settingsOverlay.classList.add("open");
         clientIdEl.focus();
       }

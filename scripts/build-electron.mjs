@@ -333,8 +333,9 @@ async function generateIcons() {
   const BLACK = [0, 0, 0], WHITE = [255, 255, 255];
   await writeFile(path.join(out, "tray.png"), trayPng(16, BLACK)); // macOS template
   await writeFile(path.join(out, "tray@2x.png"), trayPng(32, BLACK)); // macOS template, retina
-  await writeFile(path.join(out, "tray-white.png"), trayPng(16, WHITE)); // Windows
-  await writeFile(path.join(out, "tray-white@2x.png"), trayPng(32, WHITE)); // Windows, retina
+  await writeFile(path.join(out, "tray-white.png"), trayPng(16, WHITE)); // Windows 100%
+  await writeFile(path.join(out, "tray-white@1.5x.png"), trayPng(24, WHITE)); // Windows 150% (common Win11 laptop)
+  await writeFile(path.join(out, "tray-white@2x.png"), trayPng(32, WHITE)); // Windows 200%, retina
 }
 
 // --- run -------------------------------------------------------------------------------------

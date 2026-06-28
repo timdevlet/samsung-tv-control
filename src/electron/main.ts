@@ -101,12 +101,26 @@ function buildTray(): void {
   // renderSwitchIcon in scripts/build-electron.mjs. macOS loads the black silhouette and marks it
   // a template image so the system recolors it to match the menu bar (white on dark, inverting on
   // click). Windows ignores template images, so there we load the white silhouette directly — it
-  // shows white on the (typically dark) taskbar. Both have @2x retina variants auto-loaded by name.
+  // shows white on the (typically dark) taskbar. The 16px base + @2x are auto-loaded by name; the
+  // 150% (24px) size is added explicitly below since Electron's @Nx convention skips 1.5x.
   const isMac = process.platform === "darwin";
   const trayImg = nativeImage.createFromPath(
     path.join(__dirname, isMac ? "tray.png" : "tray-white.png"),
   );
-  if (isMac) trayImg.setTemplateImage(true);
+  if (isMac) {
+    trayImg.setTemplateImage(true);
+  } else {
+    // The notification-area slot is 16 DIP scaled by display DPI: 16px @100%, 24px @150%, 32px
+    // @200%. Electron's @2x filename convention only covers integer scales (1x/2x), so the 150%
+    // size — the most common Win 11 laptop scaling — must be attached as an explicit 1.5x
+    // representation; otherwise Windows downscales the 32px and the thin glyph looks soft.
+    trayImg.addRepresentation({
+      scaleFactor: 1.5,
+      buffer: nativeImage
+        .createFromPath(path.join(__dirname, "tray-white@1.5x.png"))
+        .toPNG(),
+    });
+  }
   tray = new Tray(trayImg);
   tray.setToolTip("Samsung TV Control");
   const menu = Menu.buildFromTemplate([
