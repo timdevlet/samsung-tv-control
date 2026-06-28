@@ -35,6 +35,14 @@ const COOLDOWN_MS = 0;
 const WAKE_ATTEMPTS = 10;
 const WAKE_RETRY_MS = 3000;
 
+// Periodic re-arm: macOS can silently disable the low-level keyboard tap while the machine is
+// awake (e.g. kCGEventTapDisabledByTimeout if a callback was slow), and uiohook-napi exposes no
+// event when that happens — the hotkeys just go dead with no signal. We can't detect it, so we
+// pre-emptively tear the listener down and recreate the tap on a fixed interval. The re-arm is a
+// sub-millisecond stop()/start(); the only cost is that a keystroke landing in that exact window
+// could be missed, which is harmless for a deliberately-pressed hotkey (just press again).
+const REARM_INTERVAL_MS = 5 * 60_000;
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface Daemon {
@@ -150,12 +158,18 @@ export async function startDaemon(): Promise<Daemon> {
     void triggerOn();
   });
 
+  // Watchdog: re-arm the keyboard tap on a fixed interval so a tap that died silently while the
+  // machine stayed awake recovers on its own, without needing a sleep/wake cycle to kick it.
+  const rearmTimer = setInterval(() => void rearmKeys(), REARM_INTERVAL_MS);
+  rearmTimer.unref?.(); // don't keep the process alive just for the watchdog
+
   log("TV daemon running.");
   log(`  ${ON_COMBO_LABEL}  → wake the TV and switch to PC`);
   log(`  ${OFF_COMBO_LABEL}  → turn the TV off, then sleep this PC`);
   log("  Auto-wakes the TV when this PC resumes from sleep.");
 
   function stop(): void {
+    clearInterval(rearmTimer);
     stopWake();
     stopKeys();
   }
