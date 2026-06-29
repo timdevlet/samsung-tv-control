@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { pickInput, isOnInput, parseStatus, pickTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
+import { pickInput, isOnInput, parseStatus, pickTV, isTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
 import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "../src/domain/config.js";
@@ -91,6 +91,12 @@ describe("pickTV / mainCapabilities", () => {
   });
   it("reads main-component capabilities", () => {
     expect(mainCapabilities({ deviceId: "d", components: [{ id: "main", capabilities: [{ id: "switch" }] }] })).toEqual(["switch"]);
+  });
+  it("isTV is true only for input-capable devices", () => {
+    expect(isTV(dev(["mediaInputSource"]))).toBe(true);
+    expect(isTV(dev(["samsungvd.mediaInputSource", "switch"]))).toBe(true);
+    expect(isTV(dev(["switch"]))).toBe(false);
+    expect(isTV(dev([]))).toBe(false);
   });
 });
 

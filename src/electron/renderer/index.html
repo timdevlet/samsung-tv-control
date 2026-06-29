@@ -219,6 +219,26 @@
       }
       .danger-zone p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
       button:disabled { opacity: 0.55; cursor: default; }
+      /* Device selection list — each TV is a row with a switch toggle on the right. */
+      .device-list .device-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin-bottom: 6px;
+      }
+      .device-list .device-row label { flex: 1; min-width: 0; margin: 0; color: var(--text); cursor: pointer; }
+      .device-list .device-row label small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+        word-break: break-all;
+      }
+      .device-list .device-empty { color: var(--muted); font-size: 12px; padding: 4px 0; }
+
       /* Toggle row inside a modal field — label left, macOS-style switch right */
       .field.check { display: flex; align-items: center; gap: 8px; }
       .field.check label { margin: 0; flex: 1; color: var(--text); cursor: pointer; }
@@ -272,10 +292,12 @@
       <!-- Same universal header component, just a different title + buttons. -->
       <div id="settingsHeader"></div>
       <div class="modal">
-        <p class="hint">
-          Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use
-          Sign in (in the toolbar) to approve access — tokens are stored automatically.
-        </p>
+        <div class="field"> 
+          <p class="hint">
+            Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use
+            Sign in (in the toolbar) to approve access — tokens are stored automatically.
+          </p>
+        </div>
         <div class="field">
           <label for="clientId">Client ID</label>
           <input id="clientId" type="text" autocomplete="off" spellcheck="false" />
@@ -292,6 +314,10 @@
           <label for="pcInput">PC input</label>
           <input id="pcInput" type="text" autocomplete="off" spellcheck="false" placeholder="HDMI2" />
           <div class="hints" id="pcInputHints"></div>
+        </div>
+        <div class="field">
+          <label>TVs to control</label>
+          <div id="deviceList" class="device-list"></div>
         </div>
         <div class="field">
           <label>Wake TV → PC hotkey</label>
@@ -316,7 +342,6 @@
         </div>
         <p class="error" id="settingsError"></p>
         <div class="danger-zone" id="dangerZone">
-          <h3>Danger zone</h3>
           <p>Sign out to clear stored tokens from this device.</p>
           <button id="logoutBtn" class="danger">Sign out</button>
         </div>
@@ -556,7 +581,82 @@
         "HDMI1", "HDMI2", "HDMI3", "HDMI4",
       ]);
       const minimizeToTrayEl = document.getElementById("minimizeToTray");
+      const deviceListEl = document.getElementById("deviceList");
       const settingsErrorEl = document.getElementById("settingsError");
+
+      // --- Device selection list ---------------------------------------------
+      // Renders one toggle row per TV on the account. Built with createElement (never innerHTML
+      // for dynamic values) so device labels can't inject markup under the strict CSP. Each row's
+      // checkbox carries its deviceId in dataset.id; collectSelectedDeviceIds() reads them back.
+      function renderDeviceMessage(text) {
+        deviceListEl.replaceChildren();
+        const p = document.createElement("div");
+        p.className = "device-empty";
+        p.textContent = text;
+        deviceListEl.appendChild(p);
+      }
+
+      function renderDeviceList(devices, selectedIds) {
+        deviceListEl.replaceChildren();
+        const selected = new Set(selectedIds || []);
+        for (const dev of devices) {
+          const row = document.createElement("div");
+          row.className = "device-row";
+
+          const label = document.createElement("label");
+          label.append(document.createTextNode(dev.label));
+          // Subtitle line: the model name (when it differs from the label) and the device id, so
+          // the opaque SmartThings UUID is visible for debugging/support. Joined with " · ".
+          const sub = [dev.name && dev.name !== dev.label ? dev.name : null, dev.deviceId]
+            .filter(Boolean)
+            .join(" · ");
+          const small = document.createElement("small");
+          small.textContent = sub;
+          label.appendChild(small);
+
+          const sw = document.createElement("span");
+          sw.className = "switch";
+          const input = document.createElement("input");
+          input.type = "checkbox";
+          input.dataset.id = dev.deviceId;
+          input.checked = selected.has(dev.deviceId);
+          const track = document.createElement("span");
+          track.className = "track";
+          sw.append(input, track);
+
+          // Clicking the label toggles the switch (the input is inside the .switch span).
+          const inputId = "dev-" + dev.deviceId;
+          input.id = inputId;
+          label.setAttribute("for", inputId);
+
+          row.append(label, sw);
+          deviceListEl.appendChild(row);
+        }
+      }
+
+      function collectSelectedDeviceIds() {
+        return Array.from(deviceListEl.querySelectorAll('input[type="checkbox"]'))
+          .filter((el) => el.checked)
+          .map((el) => el.dataset.id);
+      }
+
+      // Load the account's TVs and render them, preserving the saved selection. Shows a friendly
+      // message when not signed in, when the call fails, or when no TVs are found.
+      async function loadDeviceList(selectedIds) {
+        renderDeviceMessage("Loading your TVs…");
+        const res = await api.listTVs();
+        if (!res || res.ok === false) {
+          // Not signed in is the expected pre-auth state, not an error — show the sign-in prompt.
+          const msg = !res || res.notAuthorized || !res.error ? "Sign in to load your TVs." : res.error;
+          renderDeviceMessage(msg);
+          return;
+        }
+        if (res.devices.length === 0) {
+          renderDeviceMessage("No TVs found — add one in the SmartThings app.");
+          return;
+        }
+        renderDeviceList(res.devices, selectedIds);
+      }
       const settingsSaveBtn = document.getElementById("settingsSaveBtn");
       const settingsCancelBtn = document.getElementById("settingsCancelBtn");
       const settingsCloseBtn = document.getElementById("settingsCloseBtn");
@@ -649,6 +749,8 @@
         wakeHotkeyField.set(s.wakeHotkey || "");
         offHotkeyField.set(s.offHotkey || "");
         settingsErrorEl.textContent = "";
+        // Fetch the TV list in the background; render against the saved selection when it arrives.
+        void loadDeviceList(s.selectedDeviceIds || []);
         const status = await api.authStatus();
         // Sign out only makes sense when actually signed in.
         dangerZone.style.display = status.authorized ? "" : "none";
@@ -685,6 +787,7 @@
           minimizeToTrayOnClose: minimizeToTrayEl.checked,
           wakeHotkey: wakeHotkeyField.get(),
           offHotkey: offHotkeyField.get(),
+          selectedDeviceIds: collectSelectedDeviceIds(),
         });
         settingsSaveBtn.disabled = false;
         settingsCancelBtn.disabled = false;

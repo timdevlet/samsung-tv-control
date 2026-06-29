@@ -1,4 +1,4 @@
-import { parseStatus, mainCapabilities, pickTV } from "../domain/tv.js";
+import { parseStatus, mainCapabilities, pickTV, isTV } from "../domain/tv.js";
 import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain/tv.js";
 import { log } from "../log.js";
 
@@ -47,6 +47,11 @@ export class SmartThings {
       name: d.name ?? "",
       capabilities: mainCapabilities(d),
     }));
+  }
+
+  // Just the TVs on the account: devices whose main component can switch inputs.
+  async listTVs(): Promise<STDevice[]> {
+    return (await this.listDevices()).filter(isTV);
   }
 
   // Pick the most likely TV: a device whose main component can switch inputs.

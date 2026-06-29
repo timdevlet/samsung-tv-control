@@ -86,8 +86,13 @@ export function mainCapabilities(d: RawDevice): string[] {
   return (main?.capabilities ?? []).map((c) => c.id);
 }
 
+// True when a device looks like a TV: its main component exposes an input-switching capability.
+export function isTV(d: STDevice): boolean {
+  return INPUT_CAPABILITIES.some((c) => d.capabilities.includes(c));
+}
+
 // Pick the most likely TV from a device list: input-capable, preferring a power switch.
 export function pickTV(devices: STDevice[]): STDevice | null {
-  const tvs = devices.filter((d) => INPUT_CAPABILITIES.some((c) => d.capabilities.includes(c)));
+  const tvs = devices.filter(isTV);
   return tvs.find((d) => d.capabilities.includes("switch")) ?? tvs[0] ?? null;
 }

@@ -255,58 +255,6 @@ function resizeRGBA(src, sw, sh, size) {
   return dst;
 }
 
-// --- tray icon: rasterize the Lucide "toggle-right" switch glyph (ISC license, no attribution
-// required) into a monochrome silhouette with alpha. The glyph is a 24x24 viewBox containing a
-// rounded-rect outline (the switch body) and a filled circle (the knob). We draw just those two
-// primitives with analytic anti-aliasing — far simpler than a general SVG renderer, and it gives
-// crisp edges at any size. `color` is the RGB to paint the opaque pixels (black for the macOS
-// template, white for the Windows variant); alpha carries the shape either way.
-function renderSwitchIcon(size, [cr, cg, cb]) {
-  const rgba = Buffer.alloc(size * size * 4);
-  const s = size / 24; // viewBox units -> pixels
-  const SW = 2 * s; // stroke width (Lucide stroke-width=2)
-  // rounded-rect body: x2 y5 w20 h14 rx7  -> outline only (stroked, not filled)
-  const rx0 = 2 * s, ry0 = 5 * s, rx1 = 22 * s, ry1 = 19 * s, rr = 7 * s;
-  // knob: filled circle cx15 cy12 r3
-  const kx = 15 * s, ky = 12 * s, kr = 3 * s;
-
-  // signed distance to the rounded-rect's centerline path (negative inside the rect interior).
-  const rrDist = (px, py) => {
-    // distance from point to the rounded rectangle boundary (0 on the edge)
-    const hw = (rx1 - rx0) / 2 - rr, hh = (ry1 - ry0) / 2 - rr;
-    const cx = (rx0 + rx1) / 2, cy = (ry0 + ry1) / 2;
-    const qx = Math.abs(px - cx) - hw, qy = Math.abs(py - cy) - hh;
-    const ax = Math.max(qx, 0), ay = Math.max(qy, 0);
-    return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - rr;
-  };
-
-  // 3x3 supersampling for smooth edges without a full AA pipeline.
-  const SS = 3;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      let cov = 0;
-      for (let oy = 0; oy < SS; oy++) {
-        for (let ox = 0; ox < SS; ox++) {
-          const px = x + (ox + 0.5) / SS;
-          const py = y + (oy + 0.5) / SS;
-          // inside the stroked outline if within half a stroke-width of the centerline distance
-          const onStroke = Math.abs(rrDist(px, py)) <= SW / 2;
-          const inKnob = Math.hypot(px - kx, py - ky) <= kr;
-          if (onStroke || inKnob) cov++;
-        }
-      }
-      if (cov > 0) {
-        const i = (y * size + x) * 4;
-        rgba[i] = cr;
-        rgba[i + 1] = cg;
-        rgba[i + 2] = cb;
-        rgba[i + 3] = Math.round((cov / (SS * SS)) * 255);
-      }
-    }
-  }
-  return rgba;
-}
-
 async function generateIcons() {
   await mkdir(buildDir, { recursive: true });
   await mkdir(out, { recursive: true });
@@ -319,23 +267,37 @@ async function generateIcons() {
   keyOutWhite(src.rgba);
   const appIcon = (size) => encodePNG(size, resizeRGBA(src.rgba, src.width, src.height, size));
 
+  // Tray silhouette: a black controller shape on a transparent background (already RGBA with real
+  // alpha, so no white-keying). Recolored to `color` (black for the macOS template, white for the
+  // Windows variant) while keeping the source alpha as the shape mask.
+  const traySrc = decodePNG(await readFile(path.join(root, "image-black.png")));
+  const trayIcon = (size, [cr, cg, cb]) => {
+    const rgba = resizeRGBA(traySrc.rgba, traySrc.width, traySrc.height, size);
+    for (let p = 0; p < rgba.length; p += 4) {
+      rgba[p] = cr;
+      rgba[p + 1] = cg;
+      rgba[p + 2] = cb;
+    }
+    return encodePNG(size, rgba);
+  };
+
   const png512 = appIcon(512); // electron-builder requires mac/linux icon >= 512x512
   const png256 = appIcon(256);
 
   await writeFile(path.join(buildDir, "icon.png"), png512); // electron-builder mac/linux
   await writeFile(path.join(buildDir, "icon.ico"), encodeICO(png256, 256)); // electron-builder win (256 max)
   await writeFile(path.join(out, "icon.png"), png256); // BrowserWindow icon
-  // Tray icons: generated from the Lucide "toggle-right" switch glyph (single source of truth in
-  // renderSwitchIcon). macOS uses a BLACK template (tray.png/@2x) which the OS recolors to match
-  // the menu bar; Windows uses a WHITE variant (tray-white.png/@2x) shown as-is on the taskbar.
-  // 16pt base + 32px @2x retina; Electron auto-loads the @2x file by name next to the base.
-  const trayPng = (size, color) => encodePNG(size, renderSwitchIcon(size, color));
+  // Tray icons: resampled from the controller silhouette in image-black.png (see trayIcon above).
+  // macOS uses a BLACK template (tray.png/@2x) which the OS recolors to match the menu bar; Windows
+  // uses a WHITE variant (tray-white.png/@Nx) shown as-is on the taskbar. 16pt base + 24px @1.5x +
+  // 32px @2x + 48px @3x; Electron auto-loads @2x/@3x by name, while main.ts attaches the 1.5x rep.
   const BLACK = [0, 0, 0], WHITE = [255, 255, 255];
-  await writeFile(path.join(out, "tray.png"), trayPng(16, BLACK)); // macOS template
-  await writeFile(path.join(out, "tray@2x.png"), trayPng(32, BLACK)); // macOS template, retina
-  await writeFile(path.join(out, "tray-white.png"), trayPng(16, WHITE)); // Windows 100%
-  await writeFile(path.join(out, "tray-white@1.5x.png"), trayPng(24, WHITE)); // Windows 150% (common Win11 laptop)
-  await writeFile(path.join(out, "tray-white@2x.png"), trayPng(32, WHITE)); // Windows 200%, retina
+  await writeFile(path.join(out, "tray.png"), trayIcon(16, BLACK)); // macOS template
+  await writeFile(path.join(out, "tray@2x.png"), trayIcon(32, BLACK)); // macOS template, retina
+  await writeFile(path.join(out, "tray-white.png"), trayIcon(16, WHITE)); // Windows 100%
+  await writeFile(path.join(out, "tray-white@1.5x.png"), trayIcon(24, WHITE)); // Windows 150% (common Win11 laptop)
+  await writeFile(path.join(out, "tray-white@2x.png"), trayIcon(32, WHITE)); // Windows 200%, retina
+  await writeFile(path.join(out, "tray-white@3x.png"), trayIcon(48, WHITE)); // Windows 300% (high-DPI)
 }
 
 // --- run -------------------------------------------------------------------------------------

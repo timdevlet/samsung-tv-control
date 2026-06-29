@@ -24,6 +24,8 @@ export interface AppSettings {
   wakeHotkey: string;
   // Global hotkey for "TV Off & Sleep". Empty string means no hotkey is bound.
   offHotkey: string;
+  // Device ids of the TVs commands target, chosen from the account's TV list. Empty = none.
+  selectedDeviceIds: string[];
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -37,6 +39,7 @@ export async function getSettings(): Promise<AppSettings> {
     minimizeToTrayOnClose: config.minimizeToTrayOnClose ?? true,
     wakeHotkey: config.wakeHotkey ?? "",
     offHotkey: config.offHotkey ?? "",
+    selectedDeviceIds: config.selectedDeviceIds ?? [],
   };
 }
 
@@ -67,6 +70,11 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   }
   if (typeof partial.offHotkey === "string") {
     config.offHotkey = partial.offHotkey.trim();
+  }
+  // Unlike the string fields above, an empty array is meaningful (the user unchecked every TV),
+  // so persist it whenever an array is supplied rather than guarding against empties.
+  if (Array.isArray(partial.selectedDeviceIds)) {
+    config.selectedDeviceIds = partial.selectedDeviceIds;
   }
   await saveConfig(config);
 }

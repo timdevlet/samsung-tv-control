@@ -5,8 +5,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // so the 10 × 3s loop is exercised exactly as in production — without a real TV or real waiting.
 
 // Deterministic config so the test never depends on a real smartthings-config.json on disk.
+// selectedDeviceIds targets the mocked TV ("tv1") so switch()/off() act on it — without a
+// selection commands now no-op, matching the "require selection" behavior.
 vi.mock("../src/config.js", () => ({
-  loadConfig: async () => ({ pcInput: "HDMI2" }),
+  loadConfig: async () => ({ pcInput: "HDMI2", selectedDeviceIds: ["tv1"] }),
   resolveToken: () => undefined,
   saveConfig: async () => {},
   resetConfig: async () => {},
@@ -105,8 +107,8 @@ describe("power-on retry loop", () => {
     await vi.runAllTimersAsync();
     await p;
 
-    expect(powerOnCount(calls)).toBe(10);
-    expect(logs.some((l) => l.includes("after 10 attempts"))).toBe(true);
+    expect(powerOnCount(calls)).toBe(5); // POWER_ON_ATTEMPTS
+    expect(logs.some((l) => l.includes("after 5 attempts"))).toBe(true);
     // A TV that never wakes is a give-up, not an error: switch() resolves so the daemon's wake
     // retry doesn't pointlessly re-run the whole (already-connected) operation.
     expect(err).toBeUndefined();
@@ -125,6 +127,44 @@ describe("power-on retry loop", () => {
     expect(fetchMock.mock.calls.length).toBe(afterFirst); // still waiting out the 3s
     await vi.runAllTimersAsync();
     await p;
+  });
+});
+
+describe("device selection gating", () => {
+  let logs: string[];
+
+  beforeEach(() => {
+    process.env.SMARTTHINGS_TOKEN = "test-token";
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.SMARTTHINGS_TOKEN;
+  });
+
+  it("no-ops without sending any command when no TVs are selected", async () => {
+    // Re-mock loadConfig for this test to return an empty selection. resetModules so the
+    // fresh createApp() import picks up the new mock.
+    vi.resetModules();
+    vi.doMock("../src/config.js", () => ({
+      loadConfig: async () => ({ pcInput: "HDMI2", selectedDeviceIds: [] }),
+      resolveToken: () => undefined,
+      saveConfig: async () => {},
+      resetConfig: async () => {},
+      CONFIG_PATH: "test-config.json",
+    }));
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().switch();
+
+    expect(calls.length).toBe(0); // never even listed devices or sent a command
+    expect(logs.some((l) => l.includes("No TVs selected"))).toBe(true);
+    vi.doUnmock("../src/config.js");
   });
 });
 

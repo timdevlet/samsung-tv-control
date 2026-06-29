@@ -6,8 +6,12 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { LogEntry } from "../log.js";
 import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
+import type { STDevice } from "../domain/tv.js";
 
 type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
+type DeviceListResult =
+  | { ok: true; devices: STDevice[] }
+  | { ok: false; error: string; notAuthorized?: boolean };
 
 contextBridge.exposeInMainWorld("tvAPI", {
   // Subscribe to live log lines. Returns an unsubscribe function.
@@ -29,6 +33,8 @@ contextBridge.exposeInMainWorld("tvAPI", {
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   saveSettings: (partial: Partial<AppSettings>): Promise<AuthResult> =>
     ipcRenderer.invoke("settings:save", partial),
+  // The account's TVs, for the Settings device-selection list.
+  listTVs: (): Promise<DeviceListResult> => ipcRenderer.invoke("devices:list"),
   // Open the Settings modal when asked from the tray. Returns an unsubscribe function.
   onOpenSettings: (cb: () => void): (() => void) => {
     const handler = (): void => cb();

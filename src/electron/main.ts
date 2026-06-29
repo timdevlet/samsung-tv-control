@@ -11,6 +11,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } fro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startDaemon, ON_COMBO_LABEL, OFF_COMBO_LABEL, type Daemon } from "../daemon-core.js";
+import { createApp } from "../app.js";
 import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
 import { getSettings, saveSettings, type AppSettings } from "./settings.js";
@@ -186,6 +187,24 @@ async function start(): Promise<void> {
   // Settings: edit user preferences (pcInput, close-to-tray) without hand-editing the config file.
   // The daemon reloads config per action, so a new pcInput applies on the next Wake; the tray flag
   // is mirrored here so it takes effect on the next close without a restart.
+  // List the account's TVs for the Settings selection list. Builds its own app instance (each
+  // handler call reloads config + token), independent of the daemon. Returns a tagged result so
+  // the renderer can show a friendly message when the user isn't signed in or the cloud call fails.
+  ipcMain.handle("devices:list", async () => {
+    // Not signed in yet → return a clean "not authorized" result rather than letting listTVs()
+    // throw the CLI-oriented "run `npm run login`" message at the GUI. The renderer shows its own
+    // "Sign in to load your TVs." prompt for this case.
+    if (!(await getAuthStatus()).authorized) {
+      return { ok: false as const, error: "", notAuthorized: true as const };
+    }
+    try {
+      const devices = await createApp().listTVs();
+      return { ok: true as const, devices };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   ipcMain.handle("settings:get", () => getSettings());
   ipcMain.handle("settings:save", async (_e, partial: Partial<AppSettings>) => {
     await saveSettings(partial);

@@ -9,8 +9,8 @@ import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
 import { pickInput, isOnInput } from "./domain/tv.js";
 import { SmartThings } from "./api/smartthings.js";
-import type { TVStatus } from "./domain/tv.js";
-import { log } from "./log.js";
+import type { TVStatus, STDevice } from "./domain/tv.js";
+import { log, logError } from "./log.js";
 
 // Power-on retry loop: (re)send switch:on, wait, re-read status, up to POWER_ON_ATTEMPTS times,
 // pausing POWER_ON_RETRY_MS between attempts. Bounds the wake wait at ~30s (10 × 3s).
@@ -25,6 +25,8 @@ export interface App {
   switch(inputOverride?: string): Promise<void>;
   off(): Promise<void>;
   listDevices(): Promise<void>;
+  // The TVs on the account (for the Settings selection UI).
+  listTVs(): Promise<STDevice[]>;
 }
 
 export function createApp(): App {
@@ -52,26 +54,41 @@ export function createApp(): App {
     );
   }
 
-  // Resolve the TV's device id by discovering it fresh on every run (no caching).
-  async function resolveDevice(st: SmartThings): Promise<string> {
-    log("Finding the TV in your SmartThings account...");
-    const tv = await st.findTV();
-    if (!tv) {
-      throw new Error(
-        "No TV found in SmartThings. Add it in the SmartThings app first, then run `npm run devices` to inspect.",
-      );
-    }
-    log(`Found "${tv.label}".`);
-    return tv.deviceId;
+  // The TVs commands target: the ids the user selected in Settings. Empty when nothing is
+  // selected — callers log a hint and no-op rather than auto-picking a device.
+  function resolveDeviceIds(config: TVConfig): string[] {
+    return config.selectedDeviceIds ?? [];
   }
 
-  // DI core: load config, resolve token, build the client, resolve the device id.
-  async function connect(inputOverride?: string): Promise<{ config: TVConfig; st: SmartThings; deviceId: string }> {
+  // DI core: load config, resolve token, build the client.
+  async function connect(inputOverride?: string): Promise<{ config: TVConfig; st: SmartThings }> {
     const config = await loadConfig();
     if (inputOverride) config.pcInput = inputOverride;
     const st = new SmartThings(await resolveAccessToken(config));
-    const deviceId = await resolveDevice(st);
-    return { config, st, deviceId };
+    return { config, st };
+  }
+
+  // Run `op` against every selected TV in parallel. One TV failing (offline, cloud error) must
+  // not abort the others, so we use allSettled and log each rejection rather than throwing — the
+  // daemon's wake-retry is for the connect/token phase, not for an individual dead TV. Returns
+  // false (and logs a hint) when nothing is selected, so callers can stop early.
+  async function forEachSelected(
+    config: TVConfig,
+    st: SmartThings,
+    op: (deviceId: string) => Promise<void>,
+  ): Promise<boolean> {
+    const ids = resolveDeviceIds(config);
+    if (ids.length === 0) {
+      log("No TVs selected — choose one in Settings.");
+      return false;
+    }
+    const results = await Promise.allSettled(ids.map((id) => op(id)));
+    results.forEach((r, i) => {
+      if (r.status === "rejected") {
+        logError(`TV ${ids[i]} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
+      }
+    });
+    return true;
   }
 
   // Power the TV on and confirm it actually reports `on`. A single cloud switch:on can be
@@ -80,16 +97,22 @@ export function createApp(): App {
   // — the TV needs a moment to come up after waking, and it only exposes its input-source map
   // once on. We return as soon as it reports `on`. If it never does we still return — the caller
   // logs and the input switch is attempted regardless.
-  async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus): Promise<TVStatus> {
+  async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus, tag: string): Promise<TVStatus> {
     for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
-      log(`TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
+      log(`${tag}TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
       await st.powerOn(deviceId);
       await sleep(POWER_ON_RETRY_MS);
       status = await st.getStatus(deviceId);
     }
-    if (status.power === "on") log("TV is on.");
-    else log(`TV still reports off after ${POWER_ON_ATTEMPTS} attempts — it may be unreachable by the cloud (deep standby).`);
+    if (status.power === "on") log(`${tag}TV is on.`);
+    else log(`${tag}TV still reports off after ${POWER_ON_ATTEMPTS} attempts — it may be unreachable by the cloud (deep standby).`);
     return status;
+  }
+
+  // A per-device log prefix. Empty when only one TV is selected (keeps the original single-TV log
+  // lines unchanged); "[<id>] " when several, so concurrent per-device lines stay attributable.
+  function deviceTag(deviceId: string, ids: string[]): string {
+    return ids.length > 1 ? `[${deviceId}] ` : "";
   }
 
   // Read one line from stdin (only used by the one-time login flow).
@@ -124,14 +147,12 @@ export function createApp(): App {
     log("   Run `npm start` to wake the TV and switch to PC.\n");
   }
 
-  // Switch the TV to the PC input, powering it on first if needed.
-  async function switchInput(inputOverride?: string): Promise<void> {
-    const { config, st, deviceId } = await connect(inputOverride);
-
+  // Switch one TV to the PC input, powering it on first if needed.
+  async function switchOne(config: TVConfig, st: SmartThings, deviceId: string, tag: string): Promise<void> {
     // 1) Check status first; if off, wake it before switching input. We re-read after waking
     // because the off-state status often doesn't include the input-source map.
     let status = await st.getStatus(deviceId);
-    status = await ensurePoweredOn(st, deviceId, status);
+    status = await ensurePoweredOn(st, deviceId, status, tag);
 
     // If the TV never came on after all retries, stop here rather than throwing: there's no
     // input-source map to switch to, and ensurePoweredOn has already logged the give-up. Throwing
@@ -148,34 +169,47 @@ export function createApp(): App {
     }
     const target = pickInput(status, config.pcInput);
     if (isOnInput(status, target)) {
-      log(`Input is already on ${target}.`);
+      log(`${tag}Input is already on ${target}.`);
     } else {
-      log(`Switching input to ${target} (PC)...`);
+      log(`${tag}Switching input to ${target} (PC)...`);
       await st.setInputSource(deviceId, capability, target);
     }
 
-    log("Done — TV is on and switched to PC.");
+    log(`${tag}Done — TV is on and switched to PC.`);
   }
 
-  // Turn the TV off, but only when it's currently on the PC input.
-  async function off(): Promise<void> {
-    const { config, st, deviceId } = await connect();
+  // Switch every selected TV to the PC input, powering each on first if needed.
+  async function switchInput(inputOverride?: string): Promise<void> {
+    const { config, st } = await connect(inputOverride);
+    const ids = resolveDeviceIds(config);
+    await forEachSelected(config, st, (deviceId) => switchOne(config, st, deviceId, deviceTag(deviceId, ids)));
+  }
+
+  // Turn one TV off, but only when it's currently on the PC input.
+  async function offOne(config: TVConfig, st: SmartThings, deviceId: string, tag: string): Promise<void> {
     const status = await st.getStatus(deviceId);
 
     if (status.power === "off") {
-      log("TV is already off.");
+      log(`${tag}TV is already off.`);
       return;
     }
 
     const pcSource = pickInput(status, config.pcInput);
     if (!isOnInput(status, pcSource)) {
-      log(`TV input is "${status.currentInput ?? "?"}", not PC (${pcSource}) — leaving it on.`);
+      log(`${tag}TV input is "${status.currentInput ?? "?"}", not PC (${pcSource}) — leaving it on.`);
       return;
     }
 
-    log("PC is sleeping and TV is on PC input — turning the TV off...");
+    log(`${tag}PC is sleeping and TV is on PC input — turning the TV off...`);
     await st.powerOff(deviceId);
-    log("Done — TV turned off.");
+    log(`${tag}Done — TV turned off.`);
+  }
+
+  // Turn every selected TV off (each only if it's on the PC input).
+  async function off(): Promise<void> {
+    const { config, st } = await connect();
+    const ids = resolveDeviceIds(config);
+    await forEachSelected(config, st, (deviceId) => offOne(config, st, deviceId, deviceTag(deviceId, ids)));
   }
 
   // List account devices with their main capabilities (`--devices`).
@@ -193,6 +227,14 @@ export function createApp(): App {
     }
   }
 
+  // The account's TVs, for the Settings selection UI. Builds a client the same way listDevices
+  // does (load config → resolve token), then filters to input-capable devices.
+  async function listTVs(): Promise<STDevice[]> {
+    const config = await loadConfig();
+    const st = new SmartThings(await resolveAccessToken(config));
+    return st.listTVs();
+  }
+
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.
-  return { login, switch: switchInput, off, listDevices };
+  return { login, switch: switchInput, off, listDevices, listTVs };
 }

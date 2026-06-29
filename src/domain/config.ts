@@ -41,6 +41,10 @@ export interface TVConfig {
   // wakeHotkey fires "Wake TV → PC"; offHotkey fires "TV Off & Sleep".
   wakeHotkey?: string;
   offHotkey?: string;
+
+  // Device ids of the TVs commands target. Chosen in Settings from the account's
+  // TV list. Empty/unset means none selected — commands no-op rather than auto-pick.
+  selectedDeviceIds?: string[];
 }
 
 const DEFAULTS: TVConfig = {
