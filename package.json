@@ -11,7 +11,6 @@
   },
   "scripts": {
     "start": "tsx src/cli.ts",
-    "daemon": "tsx src/daemon.ts",
     "login": "tsx src/cli.ts --login",
     "devices": "tsx src/cli.ts --devices",
     "reset": "tsx src/cli.ts --reset",
@@ -20,16 +19,11 @@
     "test:watch": "vitest",
     "electron:build": "node scripts/build-electron.mjs",
     "electron:dev": "npm run electron:build && electron .",
-    "electron:rebuild": "electron-rebuild -f -w uiohook-napi",
     "dist": "npm run electron:build && electron-builder",
     "dist:win": "npm run electron:build && electron-builder --win",
     "dist:dir": "npm run electron:build && electron-builder --dir"
   },
-  "dependencies": {
-    "uiohook-napi": "^1.5.5"
-  },
   "devDependencies": {
-    "@electron/rebuild": "^4.0.6",
     "@types/node": "^22.10.0",
     "electron": "^42.5.0",
     "electron-builder": "^26.15.3",
@@ -41,7 +35,6 @@
   "build": {
     "appId": "com.timdevlet.samsung-tv-control",
     "productName": "Samsung TV Control",
-    "npmRebuild": false,
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -49,10 +42,6 @@
     "files": [
       "dist-electron/**/*",
       "package.json"
-    ],
-    "asarUnpack": [
-      "**/*.node",
-      "node_modules/uiohook-napi/**"
     ],
     "win": {
       "target": [

@@ -58,43 +58,41 @@ cp smartthings-config.example.json smartthings-config.json
 ```sh
 npm start              # find TV → turn on → switch to the configured input
 npm start -- --hdmi 3  # same, but switch to HDMI 3 this run (overrides pcInput)
-npm run daemon         # stay running; trigger on global hotkeys (see below)
 npm run login          # one-time OAuth authorize (auto-refreshing token)
 npm run devices        # list account devices + capabilities (to identify the TV)
 npm run reset          # forget the cached device id / token
-npm run electron:dev   # run the daemon as a desktop tray app with a log window
+npm run electron:dev   # run the desktop tray app (global hotkeys + log window)
 ```
 
-### Daemon + global hotkey
+### Global hotkeys
 
-`npm run daemon` runs forever and listens for two global hotkeys from anywhere:
+The desktop app (`npm run electron:dev`, or a packaged build) registers two global hotkeys that
+fire from anywhere — you don't need the window focused:
 
 | Action | macOS | Windows / Linux |
 | --- | --- | --- |
 | Wake the TV + switch to PC | **Cmd + Ctrl + E** | **Ctrl + Alt + E** |
 | Turn the TV off, then sleep this PC | **Cmd + Ctrl + Q** | **Ctrl + Alt + Q** |
 
+Both combos are **configurable in Settings** (click the field, press your combo); an empty field
+unbinds the action.
+
 The off-and-sleep hotkey turns the TV off — but **only if it's currently on the PC input**, so
 it won't switch off a TV you've put on another source — then waits 2 seconds and puts this PC to
 sleep (`pmset sleepnow` on macOS, `SetSuspendState` on Windows, `systemctl suspend` on Linux).
 
-The daemon also **wakes the TV automatically when this PC resumes from sleep**. It detects wake
+The app also **wakes the TV automatically when this PC resumes from sleep**. It detects wake
 with a simple heartbeat: a timer ticks every few seconds, and a large gap between ticks means the
 process was frozen (the PC slept). On wake it turns the TV on (only if it was off) and switches to
 PC, then pauses detection for 5 minutes so it can't re-fire. This works on all platforms — no
 extra setup.
 
-It uses [`uiohook-napi`](https://www.npmjs.com/package/uiohook-napi), which installs a
-system-wide low-level keyboard hook (so on Windows the hotkey fires even when the app
-isn't focused). A 1.5s cooldown prevents key auto-repeat from double-firing.
+Hotkeys use Electron's built-in [`globalShortcut`](https://www.electronjs.org/docs/latest/api/global-shortcut)
+(RegisterHotKey on Windows, a Carbon hotkey on macOS): the OS matches the combo system-wide and
+calls the app directly. No native module, and the registration survives sleep/wake on its own.
 
-> **macOS:** global key capture requires **Accessibility** permission. The first run
-> prompts — or grant it manually under **System Settings → Privacy & Security →
-> Accessibility** for your terminal app (Terminal/iTerm). Without it the daemon runs but
-> never sees the hotkey.
-
-To keep it running across reboots, use a process manager (pm2), a macOS `launchd` agent,
-or Windows Task Scheduler. See [Run on Windows startup](#run-on-windows-startup) below.
+> **Conflicts:** if a combo is already claimed by the OS or another app, registration fails and
+> the log notes it — pick a different combo in Settings.
 
 `--hdmi <n>` (n = 1–4) picks the input for that run without editing config; the
 shorthands `--hdmi=3` and `--hdmi3` also work. Without it, `pcInput` from
@@ -111,8 +109,8 @@ the tray (the daemon keeps running); quit from the tray menu to actually exit. T
 also exposes the two TV actions, and the window has **Wake TV → PC** / **TV off + sleep**
 buttons so you don't need the hotkeys.
 
-It runs the *exact same* daemon core as `npm run daemon` (global hotkeys, sleep/wake auto-wake,
-boot reconcile) — the window only mirrors the log output and adds buttons.
+The daemon core (global hotkeys, sleep/wake auto-wake, boot reconcile) runs inside the app — the
+window only mirrors the log output and adds buttons.
 
 ```sh
 npm run electron:dev   # build + launch the app locally (tray + log window)
@@ -142,61 +140,44 @@ Either way you can override the location with the `SMARTTHINGS_CONFIG_PATH` env 
 
 ### Building the Windows exe
 
-> ⚠️ **`uiohook-napi` is a native module**, so the Windows exe must be built **on Windows**
-> (native addons don't cross-compile from macOS/Linux). Run `npm install` then `npm run dist:win`
-> on a Windows machine (or Windows CI). `electron-builder` rebuilds the addon for Electron's ABI
-> automatically.
->
-> To run `npm run electron:dev` locally for the first time, rebuild the addon for Electron with
-> `npm run electron:rebuild` (otherwise you'll get a `NODE_MODULE_VERSION` mismatch).
+> The app has **no native modules** (global hotkeys use Electron's built-in `globalShortcut`), so
+> there's nothing to rebuild and no cross-compile caveat. Run `npm install` then `npm run dist:win`
+> on a Windows machine (or Windows CI) to produce the installer + portable exe.
 
 ## Run on Windows startup
 
-Launch the app automatically when you log in. First decide which mode you want at
-startup:
+Launch the **desktop app** automatically when you log in so the global hotkeys work any time after
+boot (it also auto-wakes the TV on resume and reconciles at boot). Build it once with
+`npm run dist:win`, then point a startup entry at the installed/portable `Samsung TV Control.exe`.
 
-- **Daemon (recommended)** — `npm run daemon` stays running in the background so the
-  **Ctrl + Alt + E** hotkey works any time after boot. Use the included
-  `shortcuts/TV-DAEMON.vbs` launcher.
-- **One-shot** — `npm start` runs once at log on (wakes the TV and switches it to PC),
-  then exits. Use the included `shortcuts/TV-to-PC-NW.vbs` launcher.
-
-> ⚠️ **Use OAuth for the token, not a PAT.** A startup launcher runs unattended, so a
-> 24h PAT would break the next day. Run `npm run login` once first — it stores an
-> **auto-refreshing** token in `smartthings-config.json` that survives reboots. (Env
-> vars set in one terminal don't carry over to a Startup-folder launch anyway.)
-> `cd tv && npm install` must have been run once so `node_modules` exists.
+> ⚠️ **Use OAuth for the token, not a PAT.** A startup launch runs unattended, so a 24h PAT would
+> break the next day. Run `npm run login` once first — it stores an **auto-refreshing** token in
+> `smartthings-config.json` that survives reboots. For a packaged app, copy that file next to the
+> portable `.exe` (or to `%APPDATA%\Samsung TV Control\`); see [Where the config lives](#where-the-config-lives-in-the-packaged-app).
 
 ### Option A — Startup folder (simplest)
 
 1. Press **Win + R**, type `shell:startup`, press Enter. This opens your per-user
    Startup folder; anything in it runs at log on.
-2. Right-click the `.vbs` launcher you want (`shortcuts/TV-DAEMON.vbs` for the
-   daemon) → **Show more options** → **Send to → Desktop (create shortcut)**, then move
-   that shortcut into the Startup folder. (Putting a *shortcut* there, rather than the
-   file itself, keeps the script in the repo.)
-3. Log out and back in to test. The `.vbs` runs with no console window; while setting
-   up, run `npm run daemon` in a terminal once to confirm the token works, since a
-   hidden window shows no errors.
+2. Right-click `Samsung TV Control.exe` → **Send to → Desktop (create shortcut)**, then move that
+   shortcut into the Startup folder. (A *shortcut* there, rather than the exe itself, keeps the
+   install in place.)
+3. Log out and back in to test — the app launches to the tray, registers the hotkeys, and shows
+   its log window.
 
 ### Option B — Task Scheduler (more robust)
 
-Better when you want auto-restart on failure or to run before/at a specific event.
+Better when you want auto-restart on failure or to run at a specific event.
 
 1. Open **Task Scheduler** → **Create Task…** (not *Basic*).
-2. **General:** name it `TV daemon`; tick **Run only when user is logged on**.
+2. **General:** name it `Samsung TV Control`; tick **Run only when user is logged on**.
 3. **Triggers:** New → **Begin the task: At log on** → your user.
-4. **Actions:** New → **Start a program**:
-   - **Program/script:** `wscript.exe`
-   - **Add arguments:** `"shortcuts\TV-DAEMON.vbs"`
-   - **Start in:** the full path to this project folder (e.g. `C:\Users\you\samsung-tv-control`).
-     Using `wscript.exe` + the `.vbs` keeps it windowless; pointing the action straight
-     at `npm` would flash a console.
-5. **Settings:** optionally enable **If the task fails, restart every 1 minute** for the
-   daemon.
+4. **Actions:** New → **Start a program** → **Program/script:** the full path to
+   `Samsung TV Control.exe`.
+5. **Settings:** optionally enable **If the task fails, restart every 1 minute**.
 
-To switch the TV at boot instead of running the daemon, point either method at
-`shortcuts/TV-to-PC-NW.vbs`.
+To switch the TV at boot *without* the persistent app, point a startup entry at `npm start`
+(one-shot: wakes the TV and switches to PC, then exits) instead.
 
 ## Configuration — `smartthings-config.json`
 

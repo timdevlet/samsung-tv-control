@@ -1,5 +1,5 @@
 // Composition root: wires all dependencies and exposes the app's command handlers.
-// Both the CLI (src/cli.ts) and the daemon (src/daemon.ts) build an app with
+// Both the CLI (src/cli.ts) and the daemon core (src/daemon-core.ts) build an app with
 // createApp() and call its handlers — neither knows how the SmartThings client or
 // config is constructed. Dependencies are wired per command invocation (each handler
 // reloads config + rebuilds the client), so a long-running daemon picks up token
@@ -12,12 +12,10 @@ import { SmartThings } from "./api/smartthings.js";
 import type { TVStatus, STDevice } from "./domain/tv.js";
 import { log, logError } from "./log.js";
 
-// Power-on retry loop: (re)send switch:on, wait, re-read status, up to POWER_ON_ATTEMPTS times,
-// pausing POWER_ON_RETRY_MS between attempts. Bounds the wake wait at ~30s (10 × 3s).
+// Power-on retry loop: (re)send switch:on, re-read status, up to POWER_ON_ATTEMPTS times, with no
+// delay between attempts. We re-read immediately rather than pausing, so the loop runs as fast as
+// the cloud round-trips allow.
 const POWER_ON_ATTEMPTS = 5;
-const POWER_ON_RETRY_MS = 3000;
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface App {
   login(): Promise<void>;
@@ -93,15 +91,13 @@ export function createApp(): App {
 
   // Power the TV on and confirm it actually reports `on`. A single cloud switch:on can be
   // dropped (the TV's WiFi is still waking, or the command lands mid-transition), so we resend
-  // up to POWER_ON_ATTEMPTS times. After each send we wait POWER_ON_RETRY_MS, then re-read status
-  // — the TV needs a moment to come up after waking, and it only exposes its input-source map
-  // once on. We return as soon as it reports `on`. If it never does we still return — the caller
-  // logs and the input switch is attempted regardless.
+  // up to POWER_ON_ATTEMPTS times, re-reading status after each send. We return as soon as it
+  // reports `on`. If it never does we still return — the caller logs and the input switch is
+  // attempted regardless.
   async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus, tag: string): Promise<TVStatus> {
     for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
       log(`${tag}TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
       await st.powerOn(deviceId);
-      await sleep(POWER_ON_RETRY_MS);
       status = await st.getStatus(deviceId);
     }
     if (status.power === "on") log(`${tag}TV is on.`);

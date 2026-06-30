@@ -1,118 +1,57 @@
-// Pure daemon decision logic — hotkey matching, boot-window check, and the timer-free
-// state machines for trigger cooldown and sleep/wake detection. No I/O; the daemon (src/
-// daemon.ts) and os/ adapters drive these with real timers and a real clock.
+// Pure daemon decision logic — hotkey label rendering, boot-window check, and the timer-free
+// state machines for trigger cooldown and sleep/wake detection. No I/O; daemon-core.ts and the
+// os/ adapters drive these with real timers and a real clock.
+//
+// Hotkeys themselves are registered with Electron's globalShortcut, which consumes the raw
+// accelerator strings ("Command+Control+E") the capture UI produces and does the system-wide
+// matching itself — so this module no longer parses or matches keys, only renders a label.
 
-// Hotkey matching
+// Hotkey labels
 
 export type Platform = "mac" | "other";
 
-export interface KeyEvent {
-  state: string; // "DOWN" | "UP"
-  name?: string;
-}
-export interface ModifierState {
-  ctrl: boolean;
-  alt: boolean;
-  meta: boolean;
-  shift: boolean;
-}
-
-// A parsed hotkey combo: the required key plus the exact modifier set. Parsed once from a
-// user-configured accelerator string, then matched against live key events.
-export interface Hotkey {
-  key: string; // uiohook key name, e.g. "E", "Q", "F8"
-  ctrl: boolean;
-  alt: boolean;
-  meta: boolean;
-  shift: boolean;
-}
-
-// Map an accelerator token (Electron-style, as produced by the renderer's capture UI) to the
-// uiohook key name that startKeyListener emits. Modifiers are handled separately; this is only
-// for the non-modifier key. Letters/digits pass through uppercased; the rest are explicit so a
-// captured "ArrowUp" or "Escape" matches what uiohook reports.
-const KEY_ALIASES: Record<string, string> = {
-  ESC: "Escape",
-  ESCAPE: "Escape",
-  SPACE: "Space",
-  PLUS: "Equal",
-  RETURN: "Enter",
-  ENTER: "Enter",
-  TAB: "Tab",
-  BACKSPACE: "Backspace",
-  DELETE: "Delete",
-  UP: "ArrowUp",
-  DOWN: "ArrowDown",
-  LEFT: "ArrowLeft",
-  RIGHT: "ArrowRight",
-};
-
-// Parse an Electron accelerator string ("Command+Control+E", "Ctrl+Alt+F8") into a Hotkey, or
-// return null if it's empty/has no non-modifier key. Modifier names follow Electron's accelerator
-// vocabulary (Command/Cmd, Control/Ctrl, Alt/Option, Shift, and the CmdOrCtrl alias). Matching is
-// case-insensitive on the token names.
-export function parseHotkey(accelerator: string): Hotkey | null {
-  if (!accelerator) return null;
-  const parts = accelerator.split("+").map((p) => p.trim()).filter(Boolean);
-  const hk: Hotkey = { key: "", ctrl: false, alt: false, meta: false, shift: false };
-  for (const part of parts) {
-    switch (part.toLowerCase()) {
+// Render an Electron accelerator string ("Command+Control+E") as a short human label for
+// logs/menus, using the platform's modifier names (mac shows Cmd/Ctrl/Opt; elsewhere Ctrl/Alt/Win).
+// An empty/unset accelerator renders as "unset". Tokens are normalized case-insensitively;
+// CmdOrCtrl resolves to the platform's primary modifier. Order matches the common convention.
+export function hotkeyLabel(accelerator: string | undefined, platform: Platform): string {
+  const accel = accelerator?.trim();
+  if (!accel) return "unset";
+  const isMac = platform === "mac";
+  const mods: string[] = [];
+  let key = "";
+  for (const raw of accel.split("+").map((p) => p.trim()).filter(Boolean)) {
+    switch (raw.toLowerCase()) {
       case "command":
       case "cmd":
       case "super":
       case "meta":
-        hk.meta = true;
+        mods.push(isMac ? "Cmd" : "Win");
         break;
       case "control":
       case "ctrl":
-        hk.ctrl = true;
+        mods.push("Ctrl");
         break;
       case "cmdorctrl":
       case "commandorcontrol":
-        // Resolved per-platform at capture time; treat as meta on mac, ctrl elsewhere isn't known
-        // here, so set both and let matching require whichever the event carries.
-        hk.meta = true;
-        hk.ctrl = true;
+        mods.push(isMac ? "Cmd" : "Ctrl");
         break;
       case "alt":
       case "option":
-        hk.alt = true;
+        mods.push(isMac ? "Opt" : "Alt");
         break;
       case "shift":
-        hk.shift = true;
+        mods.push("Shift");
         break;
-      default: {
-        const upper = part.toUpperCase();
-        hk.key = KEY_ALIASES[upper] ?? upper;
-      }
+      default:
+        key = raw;
     }
   }
-  return hk.key ? hk : null;
-}
-
-// Render a Hotkey as a short human label for logs/menus, using the platform's modifier names
-// (mac shows Cmd/Ctrl/Opt; elsewhere Ctrl/Alt). Order matches the common convention.
-export function hotkeyLabel(hotkey: Hotkey | null, platform: Platform): string {
-  if (!hotkey) return "unset";
-  const parts: string[] = [];
-  if (hotkey.ctrl) parts.push("Ctrl");
-  if (hotkey.alt) parts.push(platform === "mac" ? "Opt" : "Alt");
-  if (hotkey.shift) parts.push("Shift");
-  if (hotkey.meta) parts.push(platform === "mac" ? "Cmd" : "Win");
-  parts.push(hotkey.key);
-  return parts.join("+");
-}
-
-// True when the event is `hotkey`'s key going down with exactly its modifier set held. The match is
-// exact on every modifier so Cmd+Ctrl+E doesn't also fire on Cmd+Ctrl+Shift+E.
-export function matchHotkey(e: KeyEvent, mods: ModifierState, hotkey: Hotkey): boolean {
-  if (e.state !== "DOWN" || e.name !== hotkey.key) return false;
-  return (
-    mods.ctrl === hotkey.ctrl &&
-    mods.alt === hotkey.alt &&
-    mods.meta === hotkey.meta &&
-    mods.shift === hotkey.shift
-  );
+  if (!key) return "unset";
+  // Conventional order: Ctrl, Alt/Opt, Shift, Cmd/Win — then the key. Dedupe + sort by that rank.
+  const rank: Record<string, number> = { Ctrl: 0, Alt: 1, Opt: 1, Shift: 2, Cmd: 3, Win: 3 };
+  const ordered = [...new Set(mods)].sort((a, b) => (rank[a] ?? 9) - (rank[b] ?? 9));
+  return [...ordered, key].join("+");
 }
 
 // Boot window
@@ -124,10 +63,9 @@ export function isWithinBootWindow(uptimeSeconds: number, windowSeconds = 120): 
 
 // Retry helper
 
-// Run `op` until it resolves without throwing, up to `attempts` times, awaiting `delayMs` (via the
-// injected `sleep`) between tries. Returns once an attempt succeeds; rethrows the last error if
-// every attempt fails. `onRetry` is called before each wait with the failed attempt number and its
-// error. Sleep is injected so the logic is timer-free and unit-testable.
+// Run `op` until it resolves without throwing, up to `attempts` times, with no delay between
+// tries. Returns once an attempt succeeds; rethrows the last error if every attempt fails.
+// `onRetry` is called after each failed attempt with the attempt number and its error.
 //
 // Used for the wake/boot TV trigger: right after the PC resumes, the network stack may not have
 // finished reconnecting, so the first app.switch() calls (token refresh, device lookup) can fail
@@ -135,8 +73,6 @@ export function isWithinBootWindow(uptimeSeconds: number, windowSeconds = 120): 
 export async function withRetry(
   op: () => Promise<void>,
   attempts: number,
-  delayMs: number,
-  sleep: (ms: number) => Promise<void>,
   onRetry?: (attempt: number, err: unknown) => void,
 ): Promise<void> {
   for (let attempt = 1; ; attempt++) {
@@ -146,7 +82,6 @@ export async function withRetry(
     } catch (err) {
       if (attempt >= attempts) throw err;
       onRetry?.(attempt, err);
-      await sleep(delayMs);
     }
   }
 }

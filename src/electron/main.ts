@@ -3,9 +3,9 @@
 // Quit from the tray menu (or the window's Quit button) to actually exit.
 //
 // The window only *displays* logs and offers the two actions as buttons — all the real work is
-// the shared daemon core (src/daemon-core.ts), the exact same code the headless `npm run daemon`
-// runs. Logs reach the window by subscribing to the logger's onLog() and forwarding each line
-// over IPC; a bounded backlog is kept so a freshly-opened window can render history.
+// the daemon core (src/daemon-core.ts), which registers the global hotkeys and drives the TV.
+// Logs reach the window by subscribing to the logger's onLog() and forwarding each line over
+// IPC; a bounded backlog is kept so a freshly-opened window can render history.
 
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } from "electron";
 import path from "node:path";
@@ -225,7 +225,8 @@ async function start(): Promise<void> {
 }
 
 // Single instance: a second launch just surfaces the existing window rather than starting a
-// second daemon (two low-level keyboard hooks would double-fire every hotkey).
+// second daemon (the first instance already holds the global-shortcut registrations; a second
+// would fail to register them and the two daemons would otherwise both act on the TV).
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {

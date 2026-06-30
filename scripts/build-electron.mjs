@@ -4,8 +4,8 @@
 //
 // Why a bundle: the source is ESM TypeScript run by tsx everywhere else, but Electron's main
 // process loads a CommonJS file (.cjs) and the packaged app can't run tsx. esbuild compiles the
-// whole import graph (app/daemon/domain/os) into two self-contained .cjs files. The native addon
-// `uiohook-napi` and `electron` itself stay external (required at runtime, not inlined).
+// whole import graph (app/daemon/domain/os) into two self-contained .cjs files. `electron` itself
+// stays external (provided by the runtime, not inlined).
 
 import esbuild from "esbuild";
 import { mkdir, copyFile, writeFile, readFile } from "node:fs/promises";
@@ -43,9 +43,8 @@ async function bundle(entry, outfile, { extraExternal = [], injectImportMeta = t
     format: "cjs",
     target: "node18",
     sourcemap: true,
-    // electron is provided by the runtime; uiohook-napi is a native .node addon that can't be
-    // bundled — both must remain require()d at runtime.
-    external: ["electron", "uiohook-napi", ...extraExternal],
+    // electron is provided by the runtime and must remain require()d, not bundled.
+    external: ["electron", ...extraExternal],
     plugins: [tsResolve],
     // The main/daemon sources compute __dirname from import.meta.url (valid ESM under tsx). In a
     // CJS bundle import.meta is empty, so map it to a real file URL derived from __filename. This
@@ -267,16 +266,16 @@ async function generateIcons() {
   keyOutWhite(src.rgba);
   const appIcon = (size) => encodePNG(size, resizeRGBA(src.rgba, src.width, src.height, size));
 
-  // Tray silhouette: a black controller shape on a transparent background (already RGBA with real
-  // alpha, so no white-keying). Recolored to `color` (black for the macOS template, white for the
-  // Windows variant) while keeping the source alpha as the shape mask.
+  // macOS tray template: a black controller shape on a transparent background (image-black.png is
+  // already RGBA with real alpha, so no white-keying). Recolored to black while keeping the source
+  // alpha as the shape mask; macOS recolors the template to match the menu bar at runtime.
   const traySrc = decodePNG(await readFile(path.join(root, "image-black.png")));
-  const trayIcon = (size, [cr, cg, cb]) => {
+  const trayTemplate = (size) => {
     const rgba = resizeRGBA(traySrc.rgba, traySrc.width, traySrc.height, size);
     for (let p = 0; p < rgba.length; p += 4) {
-      rgba[p] = cr;
-      rgba[p + 1] = cg;
-      rgba[p + 2] = cb;
+      rgba[p] = 0;
+      rgba[p + 1] = 0;
+      rgba[p + 2] = 0;
     }
     return encodePNG(size, rgba);
   };
@@ -287,17 +286,16 @@ async function generateIcons() {
   await writeFile(path.join(buildDir, "icon.png"), png512); // electron-builder mac/linux
   await writeFile(path.join(buildDir, "icon.ico"), encodeICO(png256, 256)); // electron-builder win (256 max)
   await writeFile(path.join(out, "icon.png"), png256); // BrowserWindow icon
-  // Tray icons: resampled from the controller silhouette in image-black.png (see trayIcon above).
-  // macOS uses a BLACK template (tray.png/@2x) which the OS recolors to match the menu bar; Windows
-  // uses a WHITE variant (tray-white.png/@Nx) shown as-is on the taskbar. 16pt base + 24px @1.5x +
-  // 32px @2x + 48px @3x; Electron auto-loads @2x/@3x by name, while main.ts attaches the 1.5x rep.
-  const BLACK = [0, 0, 0], WHITE = [255, 255, 255];
-  await writeFile(path.join(out, "tray.png"), trayIcon(16, BLACK)); // macOS template
-  await writeFile(path.join(out, "tray@2x.png"), trayIcon(32, BLACK)); // macOS template, retina
-  await writeFile(path.join(out, "tray-white.png"), trayIcon(16, WHITE)); // Windows 100%
-  await writeFile(path.join(out, "tray-white@1.5x.png"), trayIcon(24, WHITE)); // Windows 150% (common Win11 laptop)
-  await writeFile(path.join(out, "tray-white@2x.png"), trayIcon(32, WHITE)); // Windows 200%, retina
-  await writeFile(path.join(out, "tray-white@3x.png"), trayIcon(48, WHITE)); // Windows 300% (high-DPI)
+  // macOS tray template (tray.png/@2x) is generated from image-black.png; the OS recolors it to
+  // match the menu bar. 16pt base + 32px @2x retina; Electron auto-loads the @2x file by name.
+  await writeFile(path.join(out, "tray.png"), trayTemplate(16));
+  await writeFile(path.join(out, "tray@2x.png"), trayTemplate(32));
+  // Windows tray variants are pre-rendered standing files (gray, light->dark gradient) committed in
+  // assets/tray/ — copied as-is, not generated at build time. 16/24/32/48px cover 100/150/200/300%
+  // display scaling; Electron auto-loads @2x/@3x by name, while main.ts attaches the 1.5x rep.
+  for (const name of ["tray-white.png", "tray-white@1.5x.png", "tray-white@2x.png", "tray-white@3x.png"]) {
+    await copyFile(path.join(root, "assets", "tray", name), path.join(out, name));
+  }
 }
 
 // --- run -------------------------------------------------------------------------------------

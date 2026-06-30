@@ -3,7 +3,7 @@ import { pickInput, isOnInput, parseStatus, pickTV, isTV, mainCapabilities, type
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
 import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "../src/domain/config.js";
-import { matchHotkey, parseHotkey, hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
+import { hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
 
@@ -150,59 +150,24 @@ describe("config policy", () => {
   });
 });
 
-describe("parseHotkey", () => {
-  it("parses a mac-style combo", () => {
-    expect(parseHotkey("Command+Control+E")).toEqual({ key: "E", ctrl: true, alt: false, meta: true, shift: false });
-  });
-  it("parses a win/linux-style combo with Alt", () => {
-    expect(parseHotkey("Control+Alt+Q")).toEqual({ key: "Q", ctrl: true, alt: true, meta: false, shift: false });
-  });
-  it("accepts modifier aliases and is case-insensitive", () => {
-    expect(parseHotkey("cmd+shift+f8")).toEqual({ key: "F8", ctrl: false, alt: false, meta: true, shift: true });
-  });
-  it("maps named keys to uiohook names", () => {
-    expect(parseHotkey("Ctrl+Up")?.key).toBe("ArrowUp");
-    expect(parseHotkey("Ctrl+Esc")?.key).toBe("Escape");
-  });
-  it("returns null for empty or modifier-only input", () => {
-    expect(parseHotkey("")).toBeNull();
-    expect(parseHotkey("Command+Control")).toBeNull();
-  });
-});
-
-describe("matchHotkey", () => {
-  const downE = { state: "DOWN", name: "E" };
-  const macWakeE = { key: "E", ctrl: true, alt: false, meta: true, shift: false };
-  const otherWakeE = { key: "E", ctrl: true, alt: true, meta: false, shift: false };
-  it("matches meta+ctrl on mac", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: true, shift: false }, macWakeE)).toBe(true);
-  });
-  it("matches ctrl+alt on other", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: true, meta: false, shift: false }, otherWakeE)).toBe(true);
-  });
-  it("rejects the wrong key", () => {
-    expect(matchHotkey({ state: "DOWN", name: "Q" }, { ctrl: true, alt: true, meta: false, shift: false }, otherWakeE)).toBe(false);
-  });
-  it("rejects key-up events", () => {
-    expect(matchHotkey({ state: "UP", name: "E" }, { ctrl: true, alt: true, meta: false, shift: false }, otherWakeE)).toBe(false);
-  });
-  it("rejects when modifiers aren't held", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: false, shift: false }, otherWakeE)).toBe(false);
-  });
-  it("matches modifiers exactly — extra Shift held means no match", () => {
-    expect(matchHotkey(downE, { ctrl: true, alt: false, meta: true, shift: true }, macWakeE)).toBe(false);
-  });
-});
-
 describe("hotkeyLabel", () => {
-  it("renders mac modifier names", () => {
-    expect(hotkeyLabel(parseHotkey("Command+Control+E"), "mac")).toBe("Ctrl+Cmd+E");
+  it("renders mac modifier names in conventional order", () => {
+    expect(hotkeyLabel("Command+Control+E", "mac")).toBe("Ctrl+Cmd+E");
   });
   it("renders non-mac modifier names", () => {
-    expect(hotkeyLabel(parseHotkey("Control+Alt+Q"), "other")).toBe("Ctrl+Alt+Q");
+    expect(hotkeyLabel("Control+Alt+Q", "other")).toBe("Ctrl+Alt+Q");
   });
-  it("shows 'unset' for a null hotkey", () => {
-    expect(hotkeyLabel(null, "mac")).toBe("unset");
+  it("accepts modifier aliases and is case-insensitive", () => {
+    expect(hotkeyLabel("cmd+shift+f8", "mac")).toBe("Shift+Cmd+f8");
+  });
+  it("resolves CmdOrCtrl per platform", () => {
+    expect(hotkeyLabel("CmdOrCtrl+E", "mac")).toBe("Cmd+E");
+    expect(hotkeyLabel("CmdOrCtrl+E", "other")).toBe("Ctrl+E");
+  });
+  it("shows 'unset' for empty or modifier-only input", () => {
+    expect(hotkeyLabel("", "mac")).toBe("unset");
+    expect(hotkeyLabel(undefined, "mac")).toBe("unset");
+    expect(hotkeyLabel("Command+Control", "mac")).toBe("unset");
   });
 });
 
@@ -229,41 +194,30 @@ describe("TriggerGate", () => {
 });
 
 describe("withRetry", () => {
-  // A sleep that resolves instantly so the tests don't actually wait; it records each delay.
-  const fakeSleep = (delays: number[]) => (ms: number) => { delays.push(ms); return Promise.resolve(); };
-
-  it("returns after the first success without sleeping", async () => {
-    const delays: number[] = [];
+  it("returns after the first success", async () => {
     let calls = 0;
-    await withRetry(async () => { calls++; }, 10, 3000, fakeSleep(delays));
+    await withRetry(async () => { calls++; }, 10);
     expect(calls).toBe(1);
-    expect(delays).toEqual([]); // no retry, no wait
   });
 
-  it("retries until an attempt succeeds, sleeping delayMs between tries", async () => {
-    const delays: number[] = [];
+  it("retries until an attempt succeeds, firing onRetry for each failure", async () => {
     const onRetry: number[] = [];
     let calls = 0;
     await withRetry(
       async () => { if (++calls < 3) throw new Error(`fail ${calls}`); },
       10,
-      3000,
-      fakeSleep(delays),
       (attempt) => onRetry.push(attempt),
     );
     expect(calls).toBe(3); // failed twice, succeeded on the 3rd
-    expect(delays).toEqual([3000, 3000]); // one wait after each failure
     expect(onRetry).toEqual([1, 2]); // onRetry fired for the two failures
   });
 
-  it("rethrows the last error after exhausting all attempts (no sleep after the final try)", async () => {
-    const delays: number[] = [];
+  it("rethrows the last error after exhausting all attempts", async () => {
     let calls = 0;
     await expect(
-      withRetry(async () => { calls++; throw new Error(`fail ${calls}`); }, 3, 3000, fakeSleep(delays)),
+      withRetry(async () => { calls++; throw new Error(`fail ${calls}`); }, 3),
     ).rejects.toThrow("fail 3");
     expect(calls).toBe(3); // exactly `attempts` tries
-    expect(delays).toEqual([3000, 3000]); // waited only between tries, not after the last
   });
 });
 
