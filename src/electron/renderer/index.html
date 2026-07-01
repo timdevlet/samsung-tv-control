@@ -218,6 +218,34 @@
         color: var(--error);
       }
       .danger-zone p { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+      /* Collapsible "Advanced" group housing the SmartThings OAuth client fields —
+         configured once, then tucked away so the common settings stay up top. */
+      .group {
+        margin-top: 20px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .group > summary {
+        cursor: pointer;
+        list-style: none;
+        padding: 12px 14px;
+        font-size: 13px;
+        color: var(--text);
+        user-select: none;
+      }
+      .group > summary::-webkit-details-marker { display: none; }
+      .group > summary::before {
+        content: "\25B8"; /* ▸ collapsed */
+        display: inline-block;
+        margin-right: 8px;
+        color: var(--muted);
+        transition: transform 0.15s ease;
+      }
+      .group[open] > summary::before { transform: rotate(90deg); }
+      .group > summary small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+      .group .group-body { padding: 4px 14px 14px; border-top: 1px solid var(--border); }
+      .group .group-body .field:last-child { margin-bottom: 0; }
       button:disabled { opacity: 0.55; cursor: default; }
       /* Device selection list — each TV is a row with a switch toggle on the right. */
       .device-list .device-row {
@@ -292,24 +320,6 @@
       <!-- Same universal header component, just a different title + buttons. -->
       <div id="settingsHeader"></div>
       <div class="modal">
-        <div class="field"> 
-          <p class="hint">
-            Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use
-            Sign in (in the toolbar) to approve access — tokens are stored automatically.
-          </p>
-        </div>
-        <div class="field">
-          <label for="clientId">Client ID</label>
-          <input id="clientId" type="text" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="field">
-          <label for="clientSecret">Client Secret</label>
-          <input id="clientSecret" type="password" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="field">
-          <label for="redirectUri">Redirect URI</label>
-          <input id="redirectUri" type="text" autocomplete="off" spellcheck="false" />
-        </div>
         <div class="field input-with-hints">
           <label for="pcInput">PC input</label>
           <input id="pcInput" type="text" autocomplete="off" spellcheck="false" placeholder="HDMI2" />
@@ -340,6 +350,29 @@
           </span>
           <label for="minimizeToTray">Hide to tray on close (keep running in the background)</label>
         </div>
+
+        <details class="group" id="oauthGroup">
+          <summary>SmartThings OAuth client <small>Client ID, Secret &amp; Redirect URI</small></summary>
+          <div class="group-body">
+            <p class="hint">
+              Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use
+              Sign in (in the toolbar) to approve access — tokens are stored automatically.
+            </p>
+            <div class="field">
+              <label for="clientId">Client ID</label>
+              <input id="clientId" type="text" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="field">
+              <label for="clientSecret">Client Secret</label>
+              <input id="clientSecret" type="password" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="field">
+              <label for="redirectUri">Redirect URI</label>
+              <input id="redirectUri" type="text" autocomplete="off" spellcheck="false" />
+            </div>
+          </div>
+        </details>
+
         <p class="error" id="settingsError"></p>
         <div class="danger-zone" id="dangerZone">
           <p>Sign out to clear stored tokens from this device.</p>
@@ -538,10 +571,10 @@
       function renderStatus(s) {
         statusEl.className = "status " + (s.authorized ? "ok" : "off");
         statusTextEl.textContent = s.authorized
-          ? "Signed in"
+          ? "IN"
           : s.hasClient
-          ? "Not authorized"
-          : "Not connected";
+          ? "N/A"
+          : "N/C";
         loginBtn.textContent = s.authorized ? "Account" : "Sign in";
       }
 
@@ -558,8 +591,8 @@
         const s = await api.authStatus();
         // No client configured yet (or already signed in) → open Settings to manage it.
         if (!s.hasClient || s.authorized) {
-          openSettings();
-          if (!s.hasClient) clientIdEl.focus();
+          await openSettings();
+          if (!s.hasClient) revealOAuthClient();
           return;
         }
         setBusy(true);
@@ -576,6 +609,13 @@
       const clientIdEl = document.getElementById("clientId");
       const clientSecretEl = document.getElementById("clientSecret");
       const redirectUriEl = document.getElementById("redirectUri");
+      const oauthGroupEl = document.getElementById("oauthGroup");
+      // Expand the (collapsed-by-default) OAuth group and focus the Client ID field — used when
+      // routing a user who has no client configured straight to where they set it up.
+      function revealOAuthClient() {
+        oauthGroupEl.open = true;
+        clientIdEl.focus();
+      }
       const pcInputEl = document.getElementById("pcInput");
       makeInputWithHints(pcInputEl, document.getElementById("pcInputHints"), [
         "HDMI1", "HDMI2", "HDMI3", "HDMI4",
@@ -754,8 +794,11 @@
         const status = await api.authStatus();
         // Sign out only makes sense when actually signed in.
         dangerZone.style.display = status.authorized ? "" : "none";
+        // The OAuth client is now a collapsed "Advanced" group; collapse it on each open and
+        // focus the first common setting instead of the (secondary) Client ID field.
+        oauthGroupEl.open = false;
         settingsOverlay.classList.add("open");
-        clientIdEl.focus();
+        pcInputEl.focus();
       }
 
       function closeSettings() {
