@@ -194,30 +194,41 @@ describe("TriggerGate", () => {
 });
 
 describe("withRetry", () => {
-  it("returns after the first success", async () => {
+  // A sleep that resolves instantly so the tests don't actually wait; it records each delay.
+  const fakeSleep = (delays: number[]) => (ms: number) => { delays.push(ms); return Promise.resolve(); };
+
+  it("returns after the first success without sleeping", async () => {
+    const delays: number[] = [];
     let calls = 0;
-    await withRetry(async () => { calls++; }, 10);
+    await withRetry(async () => { calls++; }, 10, 3000, fakeSleep(delays));
     expect(calls).toBe(1);
+    expect(delays).toEqual([]); // no retry, no wait
   });
 
-  it("retries until an attempt succeeds, firing onRetry for each failure", async () => {
+  it("retries until an attempt succeeds, sleeping delayMs between tries", async () => {
+    const delays: number[] = [];
     const onRetry: number[] = [];
     let calls = 0;
     await withRetry(
       async () => { if (++calls < 3) throw new Error(`fail ${calls}`); },
       10,
+      3000,
+      fakeSleep(delays),
       (attempt) => onRetry.push(attempt),
     );
     expect(calls).toBe(3); // failed twice, succeeded on the 3rd
+    expect(delays).toEqual([3000, 3000]); // one wait after each failure
     expect(onRetry).toEqual([1, 2]); // onRetry fired for the two failures
   });
 
-  it("rethrows the last error after exhausting all attempts", async () => {
+  it("rethrows the last error after exhausting all attempts (no sleep after the final try)", async () => {
+    const delays: number[] = [];
     let calls = 0;
     await expect(
-      withRetry(async () => { calls++; throw new Error(`fail ${calls}`); }, 3),
+      withRetry(async () => { calls++; throw new Error(`fail ${calls}`); }, 3, 3000, fakeSleep(delays)),
     ).rejects.toThrow("fail 3");
     expect(calls).toBe(3); // exactly `attempts` tries
+    expect(delays).toEqual([3000, 3000]); // waited only between tries, not after the last
   });
 });
 

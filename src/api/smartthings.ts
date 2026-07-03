@@ -4,21 +4,42 @@ import { log } from "../log.js";
 
 const BASE = "https://api.smartthings.com/v1";
 
+// A short human-readable reason for a rejected fetch. Undici wraps DNS/connect errors in a
+// generic "fetch failed" TypeError with the real code on `cause` (ENOTFOUND, ECONNREFUSED,
+// ENETUNREACH, ...); an AbortSignal timeout surfaces as a TimeoutError.
+export function fetchErrorDetail(err: unknown): string {
+  const cause = (err as { cause?: { code?: string } }).cause;
+  if (cause?.code) return cause.code;
+  if (err instanceof Error) return err.name === "Error" ? err.message : `${err.name}: ${err.message}`;
+  return String(err);
+}
+
 // Minimal SmartThings REST client (cloud control — no LAN access needed).
 export class SmartThings {
   constructor(private readonly token: string) {}
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {
     const method = init?.method ?? "GET";
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        "Content-Type": "application/json",
-        ...(init?.headers ?? {}),
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          "Content-Type": "application/json",
+          ...(init?.headers ?? {}),
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (err) {
+      // fetch rejects without ever producing an HTTP status when the request can't complete —
+      // DNS/connect errors while the network is still down right after resume, or the 15s
+      // timeout. Log it in the same "SmartThings API ..." shape as responses so a failed call
+      // is visible in the logs, and rethrow with the request context attached.
+      const detail = fetchErrorDetail(err);
+      log(`SmartThings API ${method} ${path} → network error (${detail})`);
+      throw new Error(`SmartThings API ${method} ${path} failed: ${detail}`);
+    }
     // Read the body once (a Response can only be consumed a single time) — reused for both logging
     // and parsing below. Log only the outcome: the HTTP status plus "ok", since a status response
     // is multiple KB of JSON we don't want dumped on every call. On failure we include a short slice

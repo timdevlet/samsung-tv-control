@@ -63,16 +63,20 @@ export function isWithinBootWindow(uptimeSeconds: number, windowSeconds = 120): 
 
 // Retry helper
 
-// Run `op` until it resolves without throwing, up to `attempts` times, with no delay between
-// tries. Returns once an attempt succeeds; rethrows the last error if every attempt fails.
-// `onRetry` is called after each failed attempt with the attempt number and its error.
+// Run `op` until it resolves without throwing, up to `attempts` times, awaiting `delayMs` (via the
+// injected `sleep`) between tries. Returns once an attempt succeeds; rethrows the last error if
+// every attempt fails. `onRetry` is called before each wait with the failed attempt number and its
+// error. Sleep is injected so the logic is timer-free and unit-testable.
 //
 // Used for the wake/boot TV trigger: right after the PC resumes, the network stack may not have
-// finished reconnecting, so the first app.switch() calls (token refresh, device lookup) can fail
-// until it's back.
+// finished reconnecting, so the first app.switch() calls (token refresh, device lookup, device
+// commands) can fail until it's back — the delay between tries is what lets the retry window
+// outlast the reconnect.
 export async function withRetry(
   op: () => Promise<void>,
   attempts: number,
+  delayMs: number,
+  sleep: (ms: number) => Promise<void>,
   onRetry?: (attempt: number, err: unknown) => void,
 ): Promise<void> {
   for (let attempt = 1; ; attempt++) {
@@ -82,6 +86,7 @@ export async function withRetry(
     } catch (err) {
       if (attempt >= attempts) throw err;
       onRetry?.(attempt, err);
+      await sleep(delayMs);
     }
   }
 }

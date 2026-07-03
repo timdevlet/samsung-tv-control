@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // Integration test for the power-on retry loop and the trimmed API logging. It drives the real
 // createApp().switch() end-to-end with a mocked SmartThings cloud (global fetch) and fake timers,
-// so the 10 × 3s loop is exercised exactly as in production — without a real TV or real waiting.
+// so the 5 × 3s loop is exercised exactly as in production — without a real TV or real waiting.
 
 // Deterministic config so the test never depends on a real smartthings-config.json on disk.
 // selectedDeviceIds targets the mocked TV ("tv1") so switch()/off() act on it — without a
@@ -16,6 +16,7 @@ vi.mock("../src/config.js", () => ({
 }));
 
 import { createApp } from "../src/app.js";
+import { withRetry } from "../src/domain/daemon.js";
 
 const TV = {
   deviceId: "tv1",
@@ -98,7 +99,7 @@ describe("power-on retry loop", () => {
     expect(logs).toContain("TV is on.");
   });
 
-  it("gives up after exactly 10 attempts when the TV never wakes — without throwing", async () => {
+  it("gives up after exactly 5 attempts when the TV never wakes — without throwing", async () => {
     const { fetchMock, calls } = makeFetch(Infinity); // always off
     vi.stubGlobal("fetch", fetchMock);
 
@@ -125,6 +126,8 @@ describe("power-on retry loop", () => {
     const afterFirst = fetchMock.mock.calls.length;
     await vi.advanceTimersByTimeAsync(2999);
     expect(fetchMock.mock.calls.length).toBe(afterFirst); // still waiting out the 3s
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(afterFirst); // 3s elapsed → next round fires
     await vi.runAllTimersAsync();
     await p;
   });
@@ -164,6 +167,119 @@ describe("device selection gating", () => {
 
     expect(calls.length).toBe(0); // never even listed devices or sent a command
     expect(logs.some((l) => l.includes("No TVs selected"))).toBe(true);
+    vi.doUnmock("../src/config.js");
+  });
+});
+
+// The wake-path bug this guards against: right after the PC resumes, WiFi can still be down, so
+// every SmartThings/token call rejects before any HTTP status exists. switch() must throw (so the
+// daemon's withRetry loop re-runs it after its delay) and the failure must be visible in the logs.
+describe("wake-path failure propagation", () => {
+  let logs: string[];
+  let errors: string[];
+
+  const networkError = (code: string) =>
+    Object.assign(new TypeError("fetch failed"), { cause: { code } });
+
+  beforeEach(() => {
+    process.env.SMARTTHINGS_TOKEN = "test-token";
+    logs = [];
+    errors = [];
+    vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+    vi.spyOn(console, "error").mockImplementation((m: unknown) => void errors.push(String(m)));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.SMARTTHINGS_TOKEN;
+  });
+
+  it("switch() rejects when every selected TV fails, and the failed call is logged", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw networkError("ENETUNREACH"); }));
+
+    await expect(createApp().switch()).rejects.toThrow(/failed: ENETUNREACH/);
+
+    // The rejected fetch has no HTTP status to log, but must still leave an API trace.
+    expect(logs).toContain("SmartThings API GET /devices/tv1/status → network error (ENETUNREACH)");
+    expect(errors.some((l) => l.includes("TV tv1 failed"))).toBe(true);
+  });
+
+  it("switch() still resolves when only one of two selected TVs fails", async () => {
+    vi.resetModules();
+    vi.doMock("../src/config.js", () => ({
+      loadConfig: async () => ({ pcInput: "HDMI2", selectedDeviceIds: ["tv1", "tv2"] }),
+      resolveToken: () => undefined,
+      saveConfig: async () => {},
+      resetConfig: async () => {},
+      CONFIG_PATH: "test-config.json",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const u = String(url);
+      if (u.includes("/devices/tv2/")) throw networkError("ECONNREFUSED");
+      if (u.includes("/status")) return new Response(JSON.stringify(statusBody("on")), { status: 200 });
+      throw new Error(`unexpected request: ${u}`);
+    }));
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().switch(); // resolves: one TV still worked
+
+    expect(errors.some((l) => l.includes("TV tv2 failed"))).toBe(true);
+    vi.doUnmock("../src/config.js");
+  });
+
+  it("the wake retry spans a network outage: fails, waits, then succeeds", async () => {
+    // The injected sleep stands in for the 3s wait during which WiFi finishes reconnecting.
+    let networkUp = false;
+    const { fetchMock } = makeFetch(0); // once the network is up: TV already on
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (!networkUp) throw networkError("ENETUNREACH");
+      return fetchMock(url, init);
+    }));
+
+    const attempts: number[] = [];
+    const app = createApp();
+    await withRetry(
+      () => app.switch(),
+      10,
+      3000,
+      async () => { networkUp = true; },
+      (attempt) => attempts.push(attempt),
+    );
+
+    expect(attempts).toEqual([1]); // one failed attempt, then success on the retry
+    expect(logs.some((l) => l.includes("network error (ENETUNREACH)"))).toBe(true);
+    expect(logs).toContain("Done — TV is on and switched to PC.");
+  });
+
+  it("a token-refresh network failure is logged without leaking secrets", async () => {
+    delete process.env.SMARTTHINGS_TOKEN; // force the OAuth refresh path
+    vi.resetModules();
+    vi.doMock("../src/config.js", () => ({
+      loadConfig: async () => ({
+        pcInput: "HDMI2",
+        selectedDeviceIds: ["tv1"],
+        clientId: "client-id",
+        clientSecret: "super-secret-value",
+        refreshToken: "refresh-token-value",
+        accessToken: "stale-access-token",
+        accessTokenExpiresAt: 0, // long expired → refresh required
+      }),
+      resolveToken: () => undefined,
+      saveConfig: async () => {},
+      resetConfig: async () => {},
+      CONFIG_PATH: "test-config.json",
+    }));
+    vi.stubGlobal("fetch", vi.fn(async () => { throw networkError("ENOTFOUND"); }));
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await expect(freshCreateApp().switch()).rejects.toThrow(/token request failed: ENOTFOUND/);
+
+    expect(logs).toContain("SmartThings token refresh_token → network error (ENOTFOUND)");
+    for (const line of [...logs, ...errors]) {
+      expect(line).not.toContain("super-secret-value");
+      expect(line).not.toContain("refresh-token-value");
+    }
     vi.doUnmock("../src/config.js");
   });
 });

@@ -37,12 +37,16 @@ export const OFF_COMBO_LABEL = hotkeyLabel(DEFAULT_OFF_ACCEL, PLATFORM);
 // spawn concurrent handlers — but there's no rate-limiting delay afterwards.
 const COOLDOWN_MS = 0;
 
-// Wake retry: re-run the whole wake operation up to WAKE_ATTEMPTS times, with no delay between
-// attempts, when it throws. Covers the network stack not having reconnected yet right after the PC
-// resumes — the token refresh / device lookup inside app.switch() can fail until it's back. A dead
-// TV doesn't throw (app.switch returns after its own power-on retries), so this never stacks a
-// second loop.
+// Wake retry: re-run the whole wake operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, when
+// it throws. Covers the network stack not having reconnected yet right after the PC resumes — the
+// token refresh / device lookup / device commands inside app.switch() can fail until it's back
+// (app.switch throws when every selected TV failed), and the delay is what lets the ~30s retry
+// window outlast the reconnect. A dead TV that just won't power on doesn't throw (app.switch
+// returns after its own power-on retries), so this never stacks a second loop.
 const WAKE_ATTEMPTS = 10;
+const WAKE_RETRY_MS = 3000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface Daemon {
   // Wake the TV and switch it to the PC input (with the post-wake retry loop).
@@ -70,8 +74,8 @@ export async function startDaemon(): Promise<Daemon> {
   let offAccel = DEFAULT_OFF_ACCEL;
 
   // Wake the TV and switch it to the PC input (Cmd/Ctrl + E, on PC wake, and at boot). Retries the
-  // whole operation up to WAKE_ATTEMPTS times, with no delay between attempts, on a thrown error —
-  // so a network stack that's still reconnecting right after the PC resumes gets several chances.
+  // whole operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, on a thrown error — so a
+  // network stack that's still reconnecting right after the PC resumes gets several chances.
   async function triggerOn(): Promise<void> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${hotkeyLabel(wakeAccel, PLATFORM)} ignored — a command is still running.`);
@@ -82,8 +86,10 @@ export async function startDaemon(): Promise<Daemon> {
       await withRetry(
         () => app.switch(),
         WAKE_ATTEMPTS,
+        WAKE_RETRY_MS,
+        sleep,
         (attempt, err) =>
-          log(`attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying...`),
+          log(`attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${WAKE_RETRY_MS / 1000}s...`),
       );
     } catch (e) {
       logError(`failed after ${WAKE_ATTEMPTS} attempts: ${e instanceof Error ? e.message : String(e)}`);
@@ -101,12 +107,18 @@ export async function startDaemon(): Promise<Daemon> {
     log(`\n${hotkeyLabel(offAccel, PLATFORM)} → turning TV off, then sleeping this PC...`);
     try {
       await app.off();
-      log("Putting this PC to sleep...");
+    } catch (e) {
+      logError(`TV off failed: ${e instanceof Error ? e.message : String(e)} — sleeping this PC anyway.`);
+    } finally {
+      // Release before suspending: sleepPc()'s child process may not exit (and so not resolve)
+      // until the machine resumes, and the resume-time triggerOn must not find the gate busy.
+      gate.release(Date.now());
+    }
+    log("Putting this PC to sleep...");
+    try {
       await sleepPc();
     } catch (e) {
-      logError(`failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      gate.release(Date.now());
+      logError(`sleep failed: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 

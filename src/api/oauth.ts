@@ -6,6 +6,8 @@ import {
 } from "../domain/oauth.js";
 import type { TVConfig } from "../domain/config.js";
 import { saveConfig } from "../config.js";
+import { fetchErrorDetail } from "./smartthings.js";
+import { log } from "../log.js";
 
 // Pure helpers are re-exported from their new home for existing importers.
 export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI } from "../domain/oauth.js";
@@ -25,15 +27,25 @@ function basicAuth(config: TVConfig): string {
 }
 
 async function postToken(config: TVConfig, params: Record<string, string>): Promise<TokenResponse> {
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      Authorization: basicAuth(config),
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams(params).toString(),
-    signal: AbortSignal.timeout(15_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(TOKEN_URL, {
+      method: "POST",
+      headers: {
+        Authorization: basicAuth(config),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(params).toString(),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    // Same visibility rule as the SmartThings client: a fetch that never completes (network
+    // still down after resume, timeout) must leave a trace in the logs. Log the grant type and
+    // reason only — never the params, tokens, or auth header.
+    const detail = fetchErrorDetail(err);
+    log(`SmartThings token ${params.grant_type} → network error (${detail})`);
+    throw new Error(`SmartThings token request failed: ${detail}`);
+  }
 
   const text = await res.text();
   let json: (TokenResponse & TokenError) | TokenError;
@@ -42,6 +54,9 @@ async function postToken(config: TVConfig, params: Record<string, string>): Prom
   } catch {
     json = { raw: text };
   }
+
+  // Outcome only (grant type + HTTP status) — token responses must never be logged.
+  log(`SmartThings token ${params.grant_type} → ${res.status} ${res.ok ? "ok" : json.error ?? "error"}`);
 
   if (!res.ok) {
     const detail = json.error_description || json.error || json.raw || text;
