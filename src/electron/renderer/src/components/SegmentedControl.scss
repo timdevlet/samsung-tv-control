@@ -1,0 +1,28 @@
+/* Segmented control — mutually-exclusive options as one row of joined buttons (theme picker). */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+
+  button {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+    padding: 6px 14px;
+
+    + button { border-left: 1px solid var(--border); }
+
+    &:hover {
+      background: var(--btn-bg);
+      color: var(--text);
+    }
+
+    /* Declared after :hover so the selected segment keeps its accent while hovered. */
+    &.active {
+      background: var(--accent);
+      color: #fff;
+    }
+  }
+}

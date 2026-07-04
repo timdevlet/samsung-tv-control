@@ -1,0 +1,31 @@
+/* Universal header — one component (AppHeader), one style, used by the main screen and
+   Settings: a title (with optional subtitle), then the status pill / buttons pushed right. */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+
+  .title {
+    font-weight: 600;
+    font-size: 16px;
+    margin: 0;
+    margin-right: auto;
+
+    small {
+      color: var(--muted);
+      font-weight: 400;
+      font-size: 13px;
+      margin-left: 8px;
+    }
+  }
+
+  /* Keep every button on one line — never shrink or wrap its label. */
+  button {
+    flex: none;
+    white-space: nowrap;
+  }
+}

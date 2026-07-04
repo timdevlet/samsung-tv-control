@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { pickInput, isOnInput, parseStatus, pickTV, isTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
-import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "../src/domain/config.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, normalizeTheme, type TVConfig } from "../src/domain/config.js";
 import { hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
@@ -147,6 +147,16 @@ describe("config policy", () => {
   it("resolveStaticToken prefers env over config", () => {
     expect(resolveStaticToken({ pcInput: "x", token: "cfg" }, "  env ")).toBe("env");
     expect(resolveStaticToken({ pcInput: "x", token: "cfg" }, undefined)).toBe("cfg");
+  });
+  it("normalizeTheme passes valid values through", () => {
+    expect(normalizeTheme("light")).toBe("light");
+    expect(normalizeTheme("dark")).toBe("dark");
+    expect(normalizeTheme("system")).toBe("system");
+  });
+  it("normalizeTheme falls back to dark on unset or invalid values", () => {
+    expect(normalizeTheme(undefined)).toBe("dark");
+    expect(normalizeTheme("neon")).toBe("dark");
+    expect(normalizeTheme(42)).toBe("dark");
   });
 });
 

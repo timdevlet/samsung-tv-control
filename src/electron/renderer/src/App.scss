@@ -1,0 +1,13 @@
+/* Signed-out main screen — replaces the log pane and footer until the user signs in. */
+.log-locked {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--muted);
+  padding-bottom: 60px;
+
+  p { margin: 0; }
+}

@@ -1,0 +1,16 @@
+/* OverlayScrollbars theme (see ScrollArea.tsx): macOS-like overlay bar — transparent track,
+   rounded thumb that thickens on hover. Colors ride --muted, so light/dark follow the palette. */
+.os-theme-app {
+  --os-size: 10px;
+  --os-padding-perpendicular: 2px;
+  --os-padding-axis: 2px;
+  --os-track-bg: transparent;
+  --os-handle-border-radius: 5px;
+  --os-handle-bg: color-mix(in srgb, var(--muted) 55%, transparent);
+  --os-handle-bg-hover: color-mix(in srgb, var(--muted) 80%, transparent);
+  --os-handle-bg-active: var(--muted);
+  --os-handle-perpendicular-size: 60%;
+  --os-handle-perpendicular-size-hover: 100%;
+  --os-handle-perpendicular-size-active: 100%;
+  --os-handle-min-size: 40px;
+}

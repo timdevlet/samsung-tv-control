@@ -1,5 +1,10 @@
 // Pure config types & policy — no I/O. The file adapter lives in src/config.ts.
 
+// App color theme: fixed light/dark, or follow the OS setting.
+export type ThemePreference = "light" | "dark" | "system";
+
+export const THEME_PREFERENCES: readonly ThemePreference[] = ["light", "dark", "system"];
+
 // Persisted as smartthings-config.json (plain JSON, rewritten in full by saveConfig — any
 // comment added there is stripped on the next save). Document fields here. This is the shared
 // config shape imported across the app.
@@ -45,6 +50,10 @@ export interface TVConfig {
   // Device ids of the TVs commands target. Chosen in Settings from the account's
   // TV list. Empty/unset means none selected — commands no-op rather than auto-pick.
   selectedDeviceIds?: string[];
+
+  // App color theme. "system" follows the OS light/dark setting. Unset means dark —
+  // the app's historical appearance.
+  theme?: ThemePreference;
 }
 
 const DEFAULTS: TVConfig = {
@@ -68,4 +77,12 @@ export function defaultConfig(): TVConfig {
 // The static token to use: env var takes precedence over config.token.
 export function resolveStaticToken(config: TVConfig, envToken: string | undefined): string | undefined {
   return envToken?.trim() || config.token;
+}
+
+// Coerce an untrusted value (config file / IPC payload) to a valid theme, defaulting to dark —
+// the app's historical appearance.
+export function normalizeTheme(value: unknown): ThemePreference {
+  return THEME_PREFERENCES.includes(value as ThemePreference)
+    ? (value as ThemePreference)
+    : "dark";
 }

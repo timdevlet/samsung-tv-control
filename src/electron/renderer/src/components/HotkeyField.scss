@@ -1,0 +1,27 @@
+/* Hotkey capture row: a readonly input that shows the combo + a clear button. */
+.hotkey {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+
+  .hotkey-input {
+    flex: 1;
+    cursor: pointer;
+    font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+    text-align: center;
+  }
+
+  /* While listening for a combo, highlight the field and prompt the user. */
+  &.capturing .hotkey-input {
+    border-color: var(--accent);
+    color: var(--muted);
+  }
+
+  .hotkey-clear {
+    flex: none;
+    padding: 0 10px;
+    color: var(--muted);
+
+    &:hover { color: var(--text); }
+  }
+}

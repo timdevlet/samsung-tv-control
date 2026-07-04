@@ -1,0 +1,8 @@
+/* Inline validation error in the settings form. Scoped under .modal so the bare .error class
+   can't collide with the log's .line.error styling. */
+.modal .error {
+  color: var(--error);
+  font-size: 12px;
+  margin: 0 0 12px;
+  min-height: 0;
+}

@@ -1,0 +1,43 @@
+/* Collapsible "Advanced" group housing the SmartThings OAuth client fields —
+   configured once, then tucked away so the common settings stay up top. */
+.group {
+  margin-top: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+
+  > summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 12px 14px;
+    font-size: 13px;
+    color: var(--text);
+    user-select: none;
+
+    &::-webkit-details-marker { display: none; }
+
+    &::before {
+      content: "\25B8"; /* ▸ collapsed */
+      display: inline-block;
+      margin-right: 8px;
+      color: var(--muted);
+      transition: transform 0.15s ease;
+    }
+
+    small {
+      color: var(--muted);
+      font-weight: 400;
+      margin-left: 8px;
+    }
+  }
+
+  &[open] > summary::before { transform: rotate(90deg); }
+
+  .group-body {
+    padding: 4px 14px 14px;
+    border-top: 1px solid var(--border);
+
+    .field:last-child { margin-bottom: 0; }
+  }
+}

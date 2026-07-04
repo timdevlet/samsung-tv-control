@@ -12,7 +12,7 @@ import { mkdir, copyFile, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import zlib from "node:zlib";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "dist-electron");
@@ -299,15 +299,23 @@ async function generateIcons() {
 }
 
 // --- run -------------------------------------------------------------------------------------
-await generateIcons();
-await bundle("src/electron/main.ts", "main.cjs");
-// Preload runs sandboxed — no __filename — so skip the import.meta.url banner. It only uses
-// electron's contextBridge/ipcRenderer and never references import.meta.url.
-await bundle("src/electron/preload.ts", "preload.cjs", { injectImportMeta: false });
-await mkdir(path.join(out, "renderer"), { recursive: true });
-await copyFile(
-  path.join(root, "src/electron/renderer/index.html"),
-  path.join(out, "renderer/index.html"),
-);
+// Exported so scripts/electron-dev.mjs can build main/preload/icons while serving the renderer
+// from the Vite dev server instead of a production build.
+export async function buildMainPreloadAndIcons() {
+  await generateIcons();
+  await bundle("src/electron/main.ts", "main.cjs");
+  // Preload runs sandboxed — no __filename — so skip the import.meta.url banner. It only uses
+  // electron's contextBridge/ipcRenderer and never references import.meta.url.
+  await bundle("src/electron/preload.ts", "preload.cjs", { injectImportMeta: false });
+}
 
-console.log("Electron build complete → dist-electron/");
+// Full build when run directly (`npm run electron:build`): main + preload + icons, then the
+// React renderer bundled by Vite into dist-electron/renderer/ — same output path the old build
+// copied the static HTML to. The vite import stays lazy so importing this module doesn't pay
+// for it.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await buildMainPreloadAndIcons();
+  const { build: viteBuild } = await import("vite");
+  await viteBuild({ configFile: path.join(root, "vite.renderer.config.ts") });
+  console.log("Electron build complete → dist-electron/");
+}

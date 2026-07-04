@@ -1,0 +1,17 @@
+/* Log lines + syntax tokens. The token class names (.ts, .var-string, .var-num) are emitted
+   by lib/highlight.ts — renaming one here means changing it there too. */
+.line {
+  padding: 1px 0;
+
+  &.error {
+    color: var(--error);
+
+    /* Variables inside an error line keep the error color from overpowering them. */
+    .var-string { color: var(--log-string-on-error); }
+    .var-num { color: var(--log-num-on-error); }
+  }
+}
+
+.ts { color: var(--muted); }
+.var-string { color: var(--log-string); }
+.var-num { color: var(--log-num); }

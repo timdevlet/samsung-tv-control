@@ -1,0 +1,77 @@
+/* Global base: theme palette, reset, and element defaults. Everything component-specific
+   lives in a .scss file next to its component (e.g. components/Button.scss), imported by
+   that component — look next to the .tsx file to find its styles. */
+
+/* Theme palettes. The main process maps the theme setting (light/dark/system) onto Electron's
+   nativeTheme.themeSource, which drives prefers-color-scheme here — so switching themes needs
+   no renderer code, just these variable overrides. Dark is the default (historical) palette. */
+:root {
+  --bg: #0d1117;
+  --panel: #161b22;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #2563eb;
+  --accent-hover: #3b82f6;
+  --error: #f85149;
+  --error-hover: #ff6a5f;
+  --success: #3fb950;
+  --btn-bg: #21262d;
+  --btn-hover: #30363d;
+  --log-string: #56d4dd;
+  --log-num: #e3b341;
+  /* Variables inside an error line — brightened so the error color doesn't overpower them. */
+  --log-string-on-error: #7ee8ef;
+  --log-num-on-error: #f0c674;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #ffffff;
+    --panel: #f6f8fa;
+    --border: #d0d7de;
+    --text: #1f2328;
+    --muted: #59636e;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --error: #cf222e;
+    --error-hover: #a40e26;
+    --success: #1a7f37;
+    --btn-bg: #f6f8fa;
+    --btn-hover: #eaeef2;
+    --log-string: #0e7490;
+    --log-num: #b45309;
+    /* Darkened (not brightened) on light so they stay readable inside the red error line. */
+    --log-string-on-error: #155e75;
+    --log-num-on-error: #92400e;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+/* React mounts everything under #root, which takes over the old body flex layout. */
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Base look for every <button>, plain or component-wrapped. The Button component's
+   primary/danger variants build on this in components/Button.scss. */
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--btn-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+
+  &:hover { background: var(--btn-hover); }
+  &:disabled { opacity: 0.55; cursor: default; }
+}

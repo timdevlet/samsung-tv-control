@@ -6,6 +6,7 @@
 // rest of the app reads.
 
 import { loadConfig, saveConfig } from "../config.js";
+import { normalizeTheme, THEME_PREFERENCES, type ThemePreference } from "../domain/config.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
 
 export interface AppSettings {
@@ -26,6 +27,8 @@ export interface AppSettings {
   offHotkey: string;
   // Device ids of the TVs commands target, chosen from the account's TV list. Empty = none.
   selectedDeviceIds: string[];
+  // App color theme: "light", "dark", or "system" (follow the OS setting).
+  theme: ThemePreference;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -40,6 +43,8 @@ export async function getSettings(): Promise<AppSettings> {
     wakeHotkey: config.wakeHotkey ?? "",
     offHotkey: config.offHotkey ?? "",
     selectedDeviceIds: config.selectedDeviceIds ?? [],
+    // Defaults to dark (the historical appearance) when unset or invalid.
+    theme: normalizeTheme(config.theme),
   };
 }
 
@@ -75,6 +80,10 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   // so persist it whenever an array is supplied rather than guarding against empties.
   if (Array.isArray(partial.selectedDeviceIds)) {
     config.selectedDeviceIds = partial.selectedDeviceIds;
+  }
+  // Only the three known values are accepted — a malformed IPC payload can't corrupt the config.
+  if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {
+    config.theme = partial.theme;
   }
   await saveConfig(config);
 }

@@ -36,6 +36,21 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let daemon: Daemon | null = null;
 let quitting = false;
+// Native window background per theme, matching the renderer's --bg so the window doesn't flash
+// the wrong color before the CSS paints (on open, and on resize while loading).
+const DARK_BG = "#0d1117";
+const LIGHT_BG = "#ffffff";
+
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? DARK_BG : LIGHT_BG;
+}
+
+// Apply the theme preference app-wide. themeSource drives the native chrome (title bar) AND the
+// renderer's prefers-color-scheme media query, so the CSS switches without any renderer IPC.
+function applyTheme(theme: AppSettings["theme"]): void {
+  nativeTheme.themeSource = theme;
+  if (win && !win.isDestroyed()) win.setBackgroundColor(windowBackground());
+}
 // Mirrors config.minimizeToTrayOnClose; loaded once at startup and updated when Settings saves.
 // When false, closing the window quits the app instead of hiding to the tray.
 let minimizeToTrayOnClose = true;
@@ -51,9 +66,9 @@ function createWindow(): BrowserWindow {
     height: 580,
     minWidth: 700,
     minHeight: 500,
-    title: "Samsung TV Control",
+    title: "TV Control",
     icon: nativeImage.createFromPath(path.join(__dirname, "icon.png")),
-    backgroundColor: "#0d1117",
+    backgroundColor: windowBackground(),
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -62,7 +77,14 @@ function createWindow(): BrowserWindow {
     },
   });
 
-  void w.loadFile(path.join(__dirname, "renderer", "index.html"));
+  // Dev (`npm run electron:dev`): load the renderer from the Vite dev server so edits
+  // hot-reload. Gated on !isPackaged so a stray env var can never redirect a packaged app.
+  const devServerUrl = !app.isPackaged && process.env.VITE_DEV_SERVER_URL;
+  if (devServerUrl) {
+    void w.loadURL(devServerUrl);
+  } else {
+    void w.loadFile(path.join(__dirname, "renderer", "index.html"));
+  }
 
   // Closing the window hides it to the tray (the daemon stays alive) when that preference is on;
   // otherwise closing quits the app. The quitting flag lets the tray Quit / before-quit pass.
@@ -140,12 +162,17 @@ function buildTray(): void {
 }
 
 async function start(): Promise<void> {
-  // Force dark app appearance so the native macOS title bar (and other system chrome) is drawn
-  // dark to match the window's black UI, rather than following the OS's light/dark setting.
-  nativeTheme.themeSource = "dark";
   Menu.setApplicationMenu(null);
-  // Load the close-to-tray preference before the window can be closed.
-  minimizeToTrayOnClose = (await getSettings()).minimizeToTrayOnClose;
+  // Load preferences before the window exists: the theme must be applied first so the window is
+  // created with the right native chrome and background, and the close-to-tray flag must be set
+  // before the window can be closed.
+  const settings = await getSettings();
+  applyTheme(settings.theme);
+  minimizeToTrayOnClose = settings.minimizeToTrayOnClose;
+  // Under "system", keep the native window background in step when the OS flips light/dark.
+  nativeTheme.on("updated", () => {
+    if (win && !win.isDestroyed()) win.setBackgroundColor(windowBackground());
+  });
   buildTray();
   win = createWindow();
 
@@ -210,6 +237,8 @@ async function start(): Promise<void> {
     await saveSettings(partial);
     const next = await getSettings();
     minimizeToTrayOnClose = next.minimizeToTrayOnClose;
+    // A changed theme takes effect immediately — native chrome and renderer CSS alike.
+    applyTheme(next.theme);
     // Apply changed hotkey combos to the running daemon without a restart.
     daemon?.reloadHotkeys();
     return { ok: true as const };

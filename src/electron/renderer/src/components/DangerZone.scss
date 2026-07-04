@@ -1,0 +1,19 @@
+/* Danger zone — destructive actions, set apart from normal settings */
+.danger-zone {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px solid var(--error);
+  border-radius: 8px;
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 13px;
+    color: var(--error);
+  }
+
+  p {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+}

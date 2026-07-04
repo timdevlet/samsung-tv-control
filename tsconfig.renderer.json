@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    // "node" is needed because tvapi.d.ts type-imports preload.ts, whose type graph reaches
+    // node-side modules (process, node:fs). Type-only — nothing node lands in the bundle.
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src/electron/renderer"]
+}

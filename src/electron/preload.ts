@@ -13,7 +13,7 @@ type DeviceListResult =
   | { ok: true; devices: STDevice[] }
   | { ok: false; error: string; notAuthorized?: boolean };
 
-contextBridge.exposeInMainWorld("tvAPI", {
+const tvAPI = {
   // Subscribe to live log lines. Returns an unsubscribe function.
   onLog: (cb: (entry: LogEntry) => void): (() => void) => {
     const handler = (_e: IpcRendererEvent, entry: LogEntry) => cb(entry);
@@ -41,4 +41,11 @@ contextBridge.exposeInMainWorld("tvAPI", {
     ipcRenderer.on("open-settings", handler);
     return () => ipcRenderer.off("open-settings", handler);
   },
-});
+};
+
+// Single source of truth for the renderer: window.tvAPI is typed as exactly this object (the
+// renderer's tvapi.d.ts imports this type), so any preload/renderer drift fails `npm run
+// typecheck`. Type-only export — nothing extra lands in the bundle.
+export type TvAPI = typeof tvAPI;
+
+contextBridge.exposeInMainWorld("tvAPI", tvAPI);

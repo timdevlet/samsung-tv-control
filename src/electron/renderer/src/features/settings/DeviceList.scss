@@ -1,0 +1,35 @@
+/* Device selection list — each TV is a row (DeviceRow) with a switch toggle on the right. */
+.device-list {
+  .device-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+
+    label {
+      flex: 1;
+      min-width: 0;
+      margin: 0;
+      color: var(--text);
+      cursor: pointer;
+
+      small {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+        word-break: break-all;
+      }
+    }
+  }
+
+  /* Rendered by MutedMessage ("Loading your TVs…", errors) inside the list. */
+  .device-empty {
+    color: var(--muted);
+    font-size: 12px;
+    padding: 4px 0;
+  }
+}

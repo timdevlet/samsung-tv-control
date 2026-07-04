@@ -1,0 +1,20 @@
+/* Auth status pill in the header */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 4px;
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex: none;
+  }
+
+  &.ok .dot { background: var(--success); }
+  &.off .dot { background: var(--error); }
+}

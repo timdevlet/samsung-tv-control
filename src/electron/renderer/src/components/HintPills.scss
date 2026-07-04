@@ -1,0 +1,22 @@
+/* input-with-hints — small gray suggestion buttons below an input that fill its value.
+   (.input-with-hints is the className the Field wrapper gets; the pills render inside it.) */
+.input-with-hints .hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+
+  .hint {
+    padding: 2px 8px;
+    font-size: 11px;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+
+    &:hover {
+      color: var(--text);
+      background: var(--btn-bg);
+    }
+  }
+}
