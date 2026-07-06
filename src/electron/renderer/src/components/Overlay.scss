@@ -3,6 +3,9 @@
 .overlay {
   position: fixed;
   inset: 0;
+  /* Must beat the log pane: OverlayScrollbars makes its host position:relative, and the log
+     mounts after the overlay in the DOM, so without a z-index the log paints on top. */
+  z-index: 1;
   background: var(--bg);
   display: flex;
   flex-direction: column;
