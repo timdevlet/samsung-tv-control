@@ -71,6 +71,9 @@ export function SettingsOverlay({
             selectedDeviceIds: deviceState.devices
               .filter((d) => draft.selectedDeviceIds.has(d.deviceId))
               .map((d) => d.deviceId),
+            // Whole-map replace; the draft was seeded from disk, so entries for TVs missing
+            // from the current list (temporarily unreachable) survive saves untouched.
+            deviceConfigs: draft.deviceConfigs,
           }
         : {}),
       theme: draft.theme,
@@ -81,10 +84,30 @@ export function SettingsOverlay({
     return draft.pcInput.trim() ? null : "PC input can't be empty — keeping the last saved value.";
   });
 
+  // Which TV the "TV control" group edits: "all" = the shared input + global hotkeys (acting on
+  // the selected TVs), a deviceId = that TV's own settings. Not persisted — every open starts on
+  // "All TVs". Tab labels track the alias draft live, so renaming a TV renames its tab.
+  const [tvTab, setTvTab] = useState("all");
+  const tvTabOptions =
+    devices.kind === "ready" && devices.devices.length > 0
+      ? [
+          { value: "all", label: "All TVs" },
+          ...devices.devices.map((d) => ({
+            value: d.deviceId,
+            label: form.draft.deviceConfigs[d.deviceId]?.alias || d.label,
+          })),
+        ]
+      : null;
+  // A device can disappear between list loads — never leave the UI stranded on a gone tab.
+  const activeTvTab = tvTabOptions?.some((o) => o.value === tvTab) ? tvTab : "all";
+  const activeDeviceConfig =
+    activeTvTab === "all" ? undefined : form.draft.deviceConfigs[activeTvTab];
+
   const [oauthOpen, setOauthOpen] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(authorized);
   const [signingIn, setSigningIn] = useState(false);
   const pcInputRef = useRef<HTMLInputElement>(null);
+  const deviceInputRef = useRef<HTMLInputElement>(null);
   const clientIdRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -134,58 +157,143 @@ export function SettingsOverlay({
         {/* The 640px column centering targets .modal-inner > * — OverlayScrollbars owns the
             direct children of .modal, so the groups need their own wrapper. */}
         <div className="modal-inner">
-          <SettingsGroup title="Account">
-            {isAuthorized ? (
-              <p className="hint">Signed in to SmartThings.</p>
-            ) : (
-              <>
+          {!isAuthorized &&
+            <SettingsGroup title="Account">
                 <p className="hint">Sign in to SmartThings to control your TVs.</p>
                 <Button onClick={() => void onSignIn()} disabled={signingIn}>
                   {signingIn ? "Waiting for approval…" : "Sign in"}
                 </Button>
+              </SettingsGroup>
+          }
+          <SettingsGroup title="TV control">
+            {/* Tab bar only once the TV list is in — while loading / signed out the group
+                degrades to just the shared fields, and an autosave can't touch per-TV settings. */}
+            {tvTabOptions && (
+              <div className="tv-tabs">
+                <SegmentedControl
+                  ariaLabel="Settings for"
+                  value={activeTvTab}
+                  options={tvTabOptions}
+                  onChange={setTvTab}
+                />
+              </div>
+            )}
+            {activeTvTab === "all" ? (
+              <>
+                {tvTabOptions && (
+                  <p className="hint">
+                    These apply to the TVs enabled below. A TV's own tab can override the input.
+                  </p>
+                )}
+                <Field label="TVs to control">
+                  <DeviceList
+                    state={devices}
+                    selectedIds={form.draft.selectedDeviceIds}
+                    deviceConfigs={form.draft.deviceConfigs}
+                    onToggle={form.toggleDevice}
+                  />
+                </Field>
+                <Field label="PC input" htmlFor="pcInput" className="input-with-hints">
+                  <TextInput
+                    id="pcInput"
+                    ref={pcInputRef}
+                    placeholder="HDMI2"
+                    value={form.draft.pcInput}
+                    onValueChange={(v) => form.set("pcInput", v)}
+                  />
+                  <HintPills
+                    hints={PC_INPUT_HINTS}
+                    onPick={(v) => {
+                      form.set("pcInput", v);
+                      pcInputRef.current?.focus();
+                    }}
+                  />
+                </Field>
+                {/* HotkeyFields keyed by tab: switching tabs must remount them so an in-progress
+                    capture can't land on another TV's binding. */}
+                <Field label="Wake TV → PC hotkey">
+                  <HotkeyField
+                    key="all-wake"
+                    value={form.draft.wakeHotkey}
+                    onChange={(v) => form.set("wakeHotkey", v)}
+                    onValidationError={form.setError}
+                  />
+                </Field>
+                <Field label="TV Off & Sleep hotkey">
+                  <HotkeyField
+                    key="all-off"
+                    value={form.draft.offHotkey}
+                    onChange={(v) => form.set("offHotkey", v)}
+                    onValidationError={form.setError}
+                  />
+                </Field>
+              </>
+            ) : (
+              <>
+                <p className="hint">
+                  These apply only to this TV. Hotkeys here fire even when the TV isn't enabled
+                  for All-TVs actions; the same shortcut on several TVs triggers them together.
+                </p>
+                <SwitchField
+                  id="tvSelected"
+                  label="Control this TV (included in All-TVs actions)"
+                  checked={form.draft.selectedDeviceIds.has(activeTvTab)}
+                  onChange={(v) => form.toggleDevice(activeTvTab, v)}
+                />
+                <Field label="Name" htmlFor="tvAlias">
+                  <TextInput
+                    id="tvAlias"
+                    placeholder={
+                      devices.kind === "ready"
+                        ? devices.devices.find((d) => d.deviceId === activeTvTab)?.label
+                        : undefined
+                    }
+                    value={activeDeviceConfig?.alias ?? ""}
+                    onValueChange={(v) => form.setDeviceConfig(activeTvTab, "alias", v)}
+                  />
+                </Field>
+                <Field label="Description" htmlFor="tvDescription">
+                  <TextInput
+                    id="tvDescription"
+                    placeholder="e.g. living room tv"
+                    value={activeDeviceConfig?.description ?? ""}
+                    onValueChange={(v) => form.setDeviceConfig(activeTvTab, "description", v)}
+                  />
+                </Field>
+                <Field label="PC input" htmlFor="tvPcInput" className="input-with-hints">
+                  <TextInput
+                    id="tvPcInput"
+                    ref={deviceInputRef}
+                    placeholder={`${form.draft.pcInput.trim() || "HDMI2"} (shared)`}
+                    value={activeDeviceConfig?.pcInput ?? ""}
+                    onValueChange={(v) => form.setDeviceConfig(activeTvTab, "pcInput", v)}
+                  />
+                  <HintPills
+                    hints={PC_INPUT_HINTS}
+                    onPick={(v) => {
+                      form.setDeviceConfig(activeTvTab, "pcInput", v);
+                      deviceInputRef.current?.focus();
+                    }}
+                  />
+                </Field>
+                <Field label="Wake this TV → PC hotkey">
+                  <HotkeyField
+                    key={`${activeTvTab}-wake`}
+                    value={activeDeviceConfig?.wakeHotkey ?? ""}
+                    onChange={(v) => form.setDeviceConfig(activeTvTab, "wakeHotkey", v)}
+                    onValidationError={form.setError}
+                  />
+                </Field>
+                <Field label="This TV off & sleep PC hotkey">
+                  <HotkeyField
+                    key={`${activeTvTab}-off`}
+                    value={activeDeviceConfig?.offHotkey ?? ""}
+                    onChange={(v) => form.setDeviceConfig(activeTvTab, "offHotkey", v)}
+                    onValidationError={form.setError}
+                  />
+                </Field>
               </>
             )}
-          </SettingsGroup>
-          <SettingsGroup title="TV">
-            <Field label="PC input" htmlFor="pcInput" className="input-with-hints">
-              <TextInput
-                id="pcInput"
-                ref={pcInputRef}
-                placeholder="HDMI2"
-                value={form.draft.pcInput}
-                onValueChange={(v) => form.set("pcInput", v)}
-              />
-              <HintPills
-                hints={PC_INPUT_HINTS}
-                onPick={(v) => {
-                  form.set("pcInput", v);
-                  pcInputRef.current?.focus();
-                }}
-              />
-            </Field>
-            <Field label="TVs to control">
-              <DeviceList
-                state={devices}
-                selectedIds={form.draft.selectedDeviceIds}
-                onToggle={form.toggleDevice}
-              />
-            </Field>
-          </SettingsGroup>
-          <SettingsGroup title="Hotkeys">
-            <Field label="Wake TV → PC hotkey">
-              <HotkeyField
-                value={form.draft.wakeHotkey}
-                onChange={(v) => form.set("wakeHotkey", v)}
-                onValidationError={form.setError}
-              />
-            </Field>
-            <Field label="TV Off & Sleep hotkey">
-              <HotkeyField
-                value={form.draft.offHotkey}
-                onChange={(v) => form.set("offHotkey", v)}
-                onValidationError={form.setError}
-              />
-            </Field>
           </SettingsGroup>
           <SettingsGroup title="Behavior">
             <Field label="Theme">

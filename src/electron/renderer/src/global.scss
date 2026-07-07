@@ -26,18 +26,19 @@
 }
 @media (prefers-color-scheme: light) {
   :root {
-    --bg: #ffffff;
-    --panel: #f6f8fa;
-    --border: #d0d7de;
-    --text: #1f2328;
-    --muted: #59636e;
+    /* Warm sand grays instead of pure white — easier on the eyes. */
+    --bg: #fefefe;
+    --panel: #f4f2ee;
+    --border: #dcd6ca;
+    --text: #26231c;
+    --muted: #6b6456;
     --accent: #2563eb;
     --accent-hover: #1d4ed8;
     --error: #cf222e;
     --error-hover: #a40e26;
     --success: #1a7f37;
-    --btn-bg: #f6f8fa;
-    --btn-hover: #eaeef2;
+    --btn-bg: #e9e5da;
+    --btn-hover: #ded8c9;
     --log-string: #0e7490;
     --log-num: #b45309;
     /* Darkened (not brightened) on light so they stay readable inside the red error line. */

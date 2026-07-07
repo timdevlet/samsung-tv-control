@@ -171,6 +171,132 @@ describe("device selection gating", () => {
   });
 });
 
+// Per-device hotkeys pass explicit device ids that must win over the Settings selection —
+// the mocked config selects tv1, but the override targets tv2 only.
+describe("explicit device targeting", () => {
+  let logs: string[];
+
+  beforeEach(() => {
+    process.env.SMARTTHINGS_TOKEN = "test-token";
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.SMARTTHINGS_TOKEN;
+  });
+
+  it("switch(undefined, ['tv2']) acts on tv2 and never touches the selected tv1", async () => {
+    const { fetchMock, calls } = makeFetch(0); // on immediately — no retry timers needed
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createApp().switch(undefined, ["tv2"]);
+
+    expect(calls.some((c) => c.url.includes("/devices/tv2/"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/devices/tv1/"))).toBe(false);
+  });
+
+  it("off(['tv2']) turns tv2 off and never touches the selected tv1", async () => {
+    const { fetchMock, calls } = makeFetch(0); // on + PC input → off proceeds
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createApp().off(["tv2"]);
+
+    const powerOffs = calls.filter((c) => {
+      const cmd = (c.body as { commands?: { capability: string; command: string }[] })?.commands?.[0];
+      return cmd?.capability === "switch" && cmd?.command === "off";
+    });
+    expect(powerOffs).toHaveLength(1);
+    expect(powerOffs[0].url).toContain("/devices/tv2/commands");
+    expect(calls.some((c) => c.url.includes("/devices/tv1/"))).toBe(false);
+  });
+
+  it("no-override calls still act on the Settings selection", async () => {
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createApp().switch();
+
+    expect(calls.some((c) => c.url.includes("/devices/tv1/"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/devices/tv2/"))).toBe(false);
+  });
+});
+
+// A TV's own pcInput (deviceConfigs[id].pcInput) must win over the shared pcInput. The mocked
+// TV is on HDMI2; the shared input is set to HDMI4 so only the per-device override matches.
+describe("per-device PC input override", () => {
+  let logs: string[];
+
+  const mockConfigWith = (deviceConfigs: object) => {
+    vi.resetModules();
+    vi.doMock("../src/config.js", () => ({
+      loadConfig: async () => ({
+        pcInput: "HDMI4", // shared input — does NOT match the TV's current HDMI2
+        selectedDeviceIds: ["tv1"],
+        deviceConfigs,
+      }),
+      resolveToken: () => undefined,
+      saveConfig: async () => {},
+      resetConfig: async () => {},
+      CONFIG_PATH: "test-config.json",
+    }));
+  };
+
+  beforeEach(() => {
+    process.env.SMARTTHINGS_TOKEN = "test-token";
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+  });
+
+  afterEach(() => {
+    vi.doUnmock("../src/config.js");
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.SMARTTHINGS_TOKEN;
+  });
+
+  it("off() powers the TV off when its own input override matches the current input", async () => {
+    mockConfigWith({ tv1: { pcInput: "HDMI2" } });
+    const { fetchMock, calls } = makeFetch(0); // on, currentInput HDMI2
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().off();
+
+    const powerOffs = calls.filter((c) => {
+      const cmd = (c.body as { commands?: { capability: string; command: string }[] })?.commands?.[0];
+      return cmd?.capability === "switch" && cmd?.command === "off";
+    });
+    expect(powerOffs).toHaveLength(1);
+  });
+
+  it("off() leaves the TV on when only the non-matching shared input applies", async () => {
+    mockConfigWith({}); // no override → shared HDMI4 decides
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().off();
+
+    expect(calls.some((c) => c.url.endsWith("/commands"))).toBe(false);
+    expect(logs.some((l) => l.includes("leaving it on"))).toBe(true);
+  });
+
+  it("switch() targets the TV's own input, skipping the switch when already there", async () => {
+    mockConfigWith({ tv1: { pcInput: "HDMI2" } });
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().switch();
+
+    expect(hasSetInputSource(calls)).toBe(false); // already on the per-device input
+    expect(logs.some((l) => l.includes("already on HDMI2"))).toBe(true);
+  });
+});
+
 // The wake-path bug this guards against: right after the PC resumes, WiFi can still be down, so
 // every SmartThings/token call rejects before any HTTP status exists. switch() must throw (so the
 // daemon's withRetry loop re-runs it after its delay) and the failure must be visible in the logs.

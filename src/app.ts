@@ -21,9 +21,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface App {
   login(): Promise<void>;
-  // Switch the TV to the PC input, powering it on first if needed.
-  switch(inputOverride?: string): Promise<void>;
-  off(): Promise<void>;
+  // Switch the TV to the PC input, powering it on first if needed. `deviceIds` overrides the
+  // Settings selection (used by per-device hotkeys); omitted = all selected TVs.
+  switch(inputOverride?: string, deviceIds?: string[]): Promise<void>;
+  off(deviceIds?: string[]): Promise<void>;
   listDevices(): Promise<void>;
   // The TVs on the account (for the Settings selection UI).
   listTVs(): Promise<STDevice[]>;
@@ -73,13 +74,15 @@ export function createApp(): App {
   // TV failed we throw: that's almost certainly a transient network/cloud problem (e.g. WiFi still
   // reconnecting right after the PC resumed), not N dead TVs, and the daemon's wake-retry re-runs
   // the whole operation only on a thrown error. Returns false (and logs a hint) when nothing is
-  // selected, so callers can stop early.
+  // selected, so callers can stop early. `idsOverride` bypasses the Settings selection (per-device
+  // hotkeys target specific TVs regardless of what's selected).
   async function forEachSelected(
     config: TVConfig,
     st: SmartThings,
     op: (deviceId: string) => Promise<void>,
+    idsOverride?: string[],
   ): Promise<boolean> {
-    const ids = resolveDeviceIds(config);
+    const ids = idsOverride ?? resolveDeviceIds(config);
     if (ids.length === 0) {
       log("No TVs selected — choose one in Settings.");
       return false;
@@ -117,10 +120,18 @@ export function createApp(): App {
     return status;
   }
 
-  // A per-device log prefix. Empty when only one TV is selected (keeps the original single-TV log
-  // lines unchanged); "[<id>] " when several, so concurrent per-device lines stay attributable.
-  function deviceTag(deviceId: string, ids: string[]): string {
-    return ids.length > 1 ? `[${deviceId}] ` : "";
+  // A per-device log prefix. Empty when only one TV is targeted (keeps the original single-TV log
+  // lines unchanged); "[<alias or id>] " when several, so concurrent per-device lines stay
+  // attributable — the user's alias reads better than the SmartThings UUID.
+  function deviceTag(config: TVConfig, deviceId: string, ids: string[]): string {
+    if (ids.length <= 1) return "";
+    return `[${config.deviceConfigs?.[deviceId]?.alias || deviceId}] `;
+  }
+
+  // The input to switch/check for one TV: an explicit CLI override wins, then the TV's own
+  // configured input, then the shared pcInput.
+  function inputFor(config: TVConfig, deviceId: string, override?: string): string {
+    return override?.trim() || config.deviceConfigs?.[deviceId]?.pcInput || config.pcInput;
   }
 
   // Read one line from stdin (only used by the one-time login flow).
@@ -155,8 +166,8 @@ export function createApp(): App {
     log("   Run `npm start` to wake the TV and switch to PC.\n");
   }
 
-  // Switch one TV to the PC input, powering it on first if needed.
-  async function switchOne(config: TVConfig, st: SmartThings, deviceId: string, tag: string): Promise<void> {
+  // Switch one TV to its PC input, powering it on first if needed.
+  async function switchOne(st: SmartThings, deviceId: string, pcInput: string, tag: string): Promise<void> {
     // 1) Check status first; if off, wake it before switching input. We re-read after waking
     // because the off-state status often doesn't include the input-source map.
     let status = await st.getStatus(deviceId);
@@ -175,7 +186,7 @@ export function createApp(): App {
         "This device doesn't expose an input-source capability via SmartThings, so the source can't be changed.",
       );
     }
-    const target = pickInput(status, config.pcInput);
+    const target = pickInput(status, pcInput);
     if (isOnInput(status, target)) {
       log(`${tag}Input is already on ${target}.`);
     } else {
@@ -186,15 +197,21 @@ export function createApp(): App {
     log(`${tag}Done — TV is on and switched to PC.`);
   }
 
-  // Switch every selected TV to the PC input, powering each on first if needed.
-  async function switchInput(inputOverride?: string): Promise<void> {
+  // Switch every targeted TV to its PC input, powering each on first if needed.
+  async function switchInput(inputOverride?: string, deviceIds?: string[]): Promise<void> {
     const { config, st } = await connect(inputOverride);
-    const ids = resolveDeviceIds(config);
-    await forEachSelected(config, st, (deviceId) => switchOne(config, st, deviceId, deviceTag(deviceId, ids)));
+    const ids = deviceIds ?? resolveDeviceIds(config);
+    await forEachSelected(
+      config,
+      st,
+      (deviceId) =>
+        switchOne(st, deviceId, inputFor(config, deviceId, inputOverride), deviceTag(config, deviceId, ids)),
+      deviceIds,
+    );
   }
 
-  // Turn one TV off, but only when it's currently on the PC input.
-  async function offOne(config: TVConfig, st: SmartThings, deviceId: string, tag: string): Promise<void> {
+  // Turn one TV off, but only when it's currently on its PC input.
+  async function offOne(st: SmartThings, deviceId: string, pcInput: string, tag: string): Promise<void> {
     const status = await st.getStatus(deviceId);
 
     if (status.power === "off") {
@@ -202,7 +219,7 @@ export function createApp(): App {
       return;
     }
 
-    const pcSource = pickInput(status, config.pcInput);
+    const pcSource = pickInput(status, pcInput);
     if (!isOnInput(status, pcSource)) {
       log(`${tag}TV input is "${status.currentInput ?? "?"}", not PC (${pcSource}) — leaving it on.`);
       return;
@@ -213,11 +230,16 @@ export function createApp(): App {
     log(`${tag}Done — TV turned off.`);
   }
 
-  // Turn every selected TV off (each only if it's on the PC input).
-  async function off(): Promise<void> {
+  // Turn every targeted TV off (each only if it's on its PC input).
+  async function off(deviceIds?: string[]): Promise<void> {
     const { config, st } = await connect();
-    const ids = resolveDeviceIds(config);
-    await forEachSelected(config, st, (deviceId) => offOne(config, st, deviceId, deviceTag(deviceId, ids)));
+    const ids = deviceIds ?? resolveDeviceIds(config);
+    await forEachSelected(
+      config,
+      st,
+      (deviceId) => offOne(st, deviceId, inputFor(config, deviceId), deviceTag(config, deviceId, ids)),
+      deviceIds,
+    );
   }
 
   // List account devices with their main capabilities (`--devices`).

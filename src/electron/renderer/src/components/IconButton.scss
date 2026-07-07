@@ -1,0 +1,12 @@
+/* Icon-only button: base <button> look from global.scss, squared up and centered around
+   an SVG. Icons render muted and brighten on hover. */
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: 30px;
+  color: var(--muted);
+
+  &:hover { color: var(--text); }
+}

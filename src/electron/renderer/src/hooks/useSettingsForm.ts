@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, ThemePreference } from "../types";
+import type { AppSettings, DeviceConfigSettings, ThemePreference } from "../types";
 
 export interface SettingsDraft {
   clientId: string;
@@ -10,8 +10,19 @@ export interface SettingsDraft {
   wakeHotkey: string;
   offHotkey: string;
   selectedDeviceIds: ReadonlySet<string>;
+  // Per-TV settings keyed by deviceId; "" = unset/unbound (entries are pruned on save by the
+  // main process when every field is empty).
+  deviceConfigs: Record<string, DeviceConfigSettings>;
   theme: ThemePreference;
 }
+
+const EMPTY_DEVICE_CONFIG: DeviceConfigSettings = {
+  alias: "",
+  description: "",
+  pcInput: "",
+  wakeHotkey: "",
+  offHotkey: "",
+};
 
 const AUTOSAVE_DEBOUNCE_MS = 400;
 
@@ -33,6 +44,7 @@ export function useSettingsForm(
     wakeHotkey: initial.wakeHotkey,
     offHotkey: initial.offHotkey,
     selectedDeviceIds: new Set(initial.selectedDeviceIds),
+    deviceConfigs: initial.deviceConfigs,
     theme: initial.theme,
   });
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +59,18 @@ export function useSettingsForm(
       else next.delete(deviceId);
       return { ...d, selectedDeviceIds: next };
     });
+
+  const setDeviceConfig = (deviceId: string, key: keyof DeviceConfigSettings, value: string) =>
+    setDraft((d) => ({
+      ...d,
+      deviceConfigs: {
+        ...d.deviceConfigs,
+        [deviceId]: {
+          ...(d.deviceConfigs[deviceId] ?? EMPTY_DEVICE_CONFIG),
+          [key]: value,
+        },
+      },
+    }));
 
   // persistRef keeps the debounce effect keyed on draft changes alone (the persist closure is
   // recreated every render); pending holds the not-yet-fired save so flush/unmount can run it.
@@ -80,5 +104,5 @@ export function useSettingsForm(
   const flush = (): Promise<void> => pending.current?.() ?? Promise.resolve();
   useEffect(() => () => void flush(), []);
 
-  return { draft, set, toggleDevice, error, setError, flush };
+  return { draft, set, toggleDevice, setDeviceConfig, error, setError, flush };
 }

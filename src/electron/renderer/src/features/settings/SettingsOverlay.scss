@@ -24,3 +24,15 @@
   margin-left: auto;
   margin-right: auto;
 }
+
+/* The TV-control tab bar ("All TVs" + one per TV). TV labels are user-defined and can be long,
+   so let the segments wrap instead of overflowing the 640px column. */
+.tv-tabs {
+  margin-bottom: 16px;
+
+  .segmented {
+    flex-wrap: wrap;
+
+    button { flex: 0 0 auto; }
+  }
+}

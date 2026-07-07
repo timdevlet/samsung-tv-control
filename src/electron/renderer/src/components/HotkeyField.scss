@@ -17,11 +17,5 @@
     color: var(--muted);
   }
 
-  .hotkey-clear {
-    flex: none;
-    padding: 0 10px;
-    color: var(--muted);
-
-    &:hover { color: var(--text); }
-  }
+  .hotkey-clear { flex: none; }
 }

@@ -6,8 +6,18 @@
 // rest of the app reads.
 
 import { loadConfig, saveConfig } from "../config.js";
-import { normalizeTheme, THEME_PREFERENCES, type ThemePreference } from "../domain/config.js";
+import {
+  normalizeDeviceConfigs,
+  normalizeTheme,
+  THEME_PREFERENCES,
+  type ThemePreference,
+} from "../domain/config.js";
+import { defaultHotkeys } from "../domain/daemon.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
+
+// The combos the daemon uses when a hotkey was never configured — shown in Settings so the
+// active binding is always visible, never hidden behind an empty field.
+const HOTKEY_DEFAULTS = defaultHotkeys(process.platform === "darwin" ? "mac" : "other");
 
 export interface AppSettings {
   // OAuth client id from your SmartThings OAuth-In app.
@@ -21,14 +31,27 @@ export interface AppSettings {
   // When true, closing the window hides to the tray; when false, it quits the app.
   minimizeToTrayOnClose: boolean;
   // Global hotkey for "Wake TV → PC" as an Electron accelerator ("Command+Control+E").
-  // Empty string means no hotkey is bound.
+  // Always the *active* combo: the platform default is filled in when the config never set one.
+  // Empty string means the command is disabled (no hotkey bound).
   wakeHotkey: string;
-  // Global hotkey for "TV Off & Sleep". Empty string means no hotkey is bound.
+  // Global hotkey for "TV Off & Sleep". Same semantics as wakeHotkey.
   offHotkey: string;
   // Device ids of the TVs commands target, chosen from the account's TV list. Empty = none.
   selectedDeviceIds: string[];
+  // Per-TV settings keyed by deviceId: alias/description, an input override (empty = shared
+  // pcInput), and hotkeys firing the action for only that TV (independent of selectedDeviceIds;
+  // "" = unbound, same convention as wakeHotkey/offHotkey).
+  deviceConfigs: Record<string, DeviceConfigSettings>;
   // App color theme: "light", "dark", or "system" (follow the OS setting).
   theme: ThemePreference;
+}
+
+export interface DeviceConfigSettings {
+  alias: string;
+  description: string;
+  pcInput: string;
+  wakeHotkey: string;
+  offHotkey: string;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -40,9 +63,22 @@ export async function getSettings(): Promise<AppSettings> {
     pcInput: config.pcInput,
     // Default to the historical behavior (hide to tray) when unset.
     minimizeToTrayOnClose: config.minimizeToTrayOnClose ?? true,
-    wakeHotkey: config.wakeHotkey ?? "",
-    offHotkey: config.offHotkey ?? "",
+    // Unset = the platform default is active — show it; an explicit "" = disabled, stays empty.
+    wakeHotkey: (config.wakeHotkey ?? HOTKEY_DEFAULTS.wake).trim(),
+    offHotkey: (config.offHotkey ?? HOTKEY_DEFAULTS.off).trim(),
     selectedDeviceIds: config.selectedDeviceIds ?? [],
+    deviceConfigs: Object.fromEntries(
+      Object.entries(normalizeDeviceConfigs(config.deviceConfigs)).map(([id, cfg]) => [
+        id,
+        {
+          alias: cfg.alias ?? "",
+          description: cfg.description ?? "",
+          pcInput: cfg.pcInput ?? "",
+          wakeHotkey: cfg.wakeHotkey ?? "",
+          offHotkey: cfg.offHotkey ?? "",
+        },
+      ]),
+    ),
     // Defaults to dark (the historical appearance) when unset or invalid.
     theme: normalizeTheme(config.theme),
   };
@@ -80,6 +116,12 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   // so persist it whenever an array is supplied rather than guarding against empties.
   if (Array.isArray(partial.selectedDeviceIds)) {
     config.selectedDeviceIds = partial.selectedDeviceIds;
+  }
+  // Whole-map replace, like selectedDeviceIds: the renderer always sends the complete map, and
+  // replacing is what lets clearing all of a TV's fields delete its entry (the sanitizer prunes
+  // all-empty entries). A malformed payload normalizes to only its valid entries.
+  if (typeof partial.deviceConfigs === "object" && partial.deviceConfigs !== null) {
+    config.deviceConfigs = normalizeDeviceConfigs(partial.deviceConfigs);
   }
   // Only the three known values are accepted — a malformed IPC payload can't corrupt the config.
   if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {

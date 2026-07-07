@@ -1,8 +1,11 @@
 import { useHotkeyCapture } from "../hooks/useHotkeyCapture";
+import { IconButton, XIcon } from "./IconButton";
 import "./HotkeyField.scss";
 
 // Accelerator capture widget: click the readonly input to listen, press a combo, and it's stored
-// as an Electron accelerator string (e.g. "Command+Control+E"); × clears ("" = unbound).
+// as an Electron accelerator string (e.g. "Command+Control+E"). The field always shows the
+// active combo (Settings fills in the platform default when none was configured); × clears it,
+// and an empty field means the command is disabled.
 export function HotkeyField({
   value,
   onChange,
@@ -28,21 +31,20 @@ export function HotkeyField({
         type="text"
         readOnly
         value={value}
-        placeholder={capture.capturing ? "Press a combo…" : "Click, then press a combo"}
+        placeholder={capture.capturing ? "Press a combo…" : "Disabled — click, then press a combo"}
         onClick={capture.start}
       />
-      <button
-        type="button"
+      <IconButton
         className="hotkey-clear"
-        title="Clear"
+        title="Clear (disables this command)"
         aria-label="Clear hotkey"
         onClick={() => {
           onChange("");
           capture.cancel();
         }}
       >
-        ×
-      </button>
+        <XIcon />
+      </IconButton>
     </div>
   );
 }

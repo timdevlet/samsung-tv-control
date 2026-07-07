@@ -2,6 +2,6 @@
 // build, so none of the node-side modules are ever loaded in the sandboxed renderer.
 export type { LogEntry } from "../../../log.js";
 export type { AuthStatus } from "../../auth.js";
-export type { AppSettings } from "../../settings.js";
+export type { AppSettings, DeviceConfigSettings } from "../../settings.js";
 export type { ThemePreference } from "../../../domain/config.js";
 export type { STDevice } from "../../../domain/tv.js";
