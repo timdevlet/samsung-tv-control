@@ -28,6 +28,7 @@ import {
 import { normalizeDeviceConfigs, type DeviceConfig } from "./domain/config.js";
 import { onWake } from "./os/wake-watch.js";
 import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
+import { isMockMode } from "./dev/mock-cloud.js";
 import { loadConfig } from "./config.js";
 import { log, logError, useTimestamps } from "./log.js";
 
@@ -153,6 +154,11 @@ export async function startDaemon(): Promise<Daemon> {
       // Release before suspending: sleepPc()'s child process may not exit (and so not resolve)
       // until the machine resumes, and the resume-time triggerOn must not find the gate busy.
       gate.release(Date.now());
+    }
+    // In mock mode only the TV is fake — sleepPc() would suspend the actual dev machine.
+    if (isMockMode()) {
+      log("Mock mode — skipping PC sleep.");
+      return result;
     }
     log("Putting this PC to sleep...");
     // Detached for the same reason the gate releases early: awaiting sleepPc() would keep the

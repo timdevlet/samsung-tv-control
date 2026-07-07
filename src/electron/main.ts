@@ -16,8 +16,16 @@ import { createApp } from "../app.js";
 import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
 import { getSettings, saveSettings, type AppSettings } from "./settings.js";
+import { isMockMode, installMockCloud } from "../dev/mock-cloud.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Dev mode (SMARTTHINGS_MOCK=1, `npm run electron:dev:mock`): fake the SmartThings cloud so the
+// app runs without credentials or a real TV. Gated on !isPackaged — like VITE_DEV_SERVER_URL
+// below — so a stray env var can never put a packaged app into mock mode. Installed before any
+// config read so the config-path redirect applies from the first load.
+const mockMode = !app.isPackaged && isMockMode();
+if (mockMode) installMockCloud();
 
 // Packaged apps live in a read-only asar archive, so the SmartThings config (OAuth tokens) can't
 // be written next to the bundled source. Redirect it to a writable folder: next to the .exe for a
@@ -67,7 +75,7 @@ function createWindow(): BrowserWindow {
     height: 580,
     minWidth: 700,
     minHeight: 500,
-    title: "TV Control",
+    title: mockMode ? "TV Control (Mock)" : "TV Control",
     icon: nativeImage.createFromPath(path.join(__dirname, "icon.png")),
     backgroundColor: windowBackground(),
     autoHideMenuBar: true,
@@ -146,7 +154,7 @@ function buildTray(): void {
     });
   }
   tray = new Tray(trayImg);
-  tray.setToolTip("Samsung TV Control");
+  tray.setToolTip(mockMode ? "Samsung TV Control (Mock)" : "Samsung TV Control");
   const menu = Menu.buildFromTemplate([
     { label: "Show logs", click: () => showWindow() },
     { label: "Settings…", click: () => openSettings() },
@@ -182,6 +190,8 @@ async function start(): Promise<void> {
     pushHistory(entry);
     sendLog(entry);
   });
+
+  if (mockMode) log("⚠ MOCK MODE — SmartThings cloud is simulated; no real TV will be controlled.");
 
   ipcMain.handle("log:history", () => history);
   ipcMain.on("log:clear", () => {

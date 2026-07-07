@@ -1,5 +1,5 @@
 // Shared inline SVG icons, in the XIcon style (IconButton.tsx): stroke-only, currentColor,
-// 1.5px round caps. Header icons are fixed 16px; PowerIcon takes a size for the Power screen.
+// 1.5px round caps. Header icons are fixed 16px; the power icons take a size for the Power screen.
 
 export function GearIcon() {
   return (
@@ -53,6 +53,22 @@ export function PowerIcon({ size = 16 }: { size?: number }) {
         strokeWidth="2"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+// Power symbol with a "\" slash across it, for the OFF action.
+export function PowerOffIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 3.5v8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path
+        d="M7.5 6.2a7.5 7.5 0 1 0 9 0"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path d="M4.5 4.5l15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }

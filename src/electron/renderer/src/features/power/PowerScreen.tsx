@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { PowerIcon } from "../../components/icons";
+import { PowerIcon, PowerOffIcon } from "../../components/icons";
 import "./PowerScreen.scss";
 
 type PowerAction = "on" | "off";
@@ -56,7 +56,7 @@ export function PowerScreen() {
             onClick={() => void run("off")}
             aria-label="Power off"
           >
-            <PowerIcon size={40} />
+            <PowerOffIcon size={40} />
           </button>
           <span className="power-label">Power OFF</span>
         </div>

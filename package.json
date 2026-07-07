@@ -11,14 +11,17 @@
   },
   "scripts": {
     "start": "tsx src/cli.ts",
+    "start:mock": "SMARTTHINGS_MOCK=1 tsx src/cli.ts",
     "login": "tsx src/cli.ts --login",
     "devices": "tsx src/cli.ts --devices",
+    "devices:mock": "SMARTTHINGS_MOCK=1 tsx src/cli.ts --devices",
     "reset": "tsx src/cli.ts --reset",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.renderer.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "electron:build": "node scripts/build-electron.mjs",
     "electron:dev": "node scripts/electron-dev.mjs",
+    "electron:dev:mock": "node scripts/electron-dev.mjs --mock",
     "dist": "npm run electron:build && electron-builder",
     "dist:win": "npm run electron:build && electron-builder --win",
     "dist:dir": "npm run electron:build && electron-builder --dir"

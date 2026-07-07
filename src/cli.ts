@@ -7,9 +7,14 @@
 import { createApp } from "./app.js";
 import { resetConfig } from "./config.js";
 import { parseHdmiFlag } from "./domain/cli.js";
+import { isMockMode, installMockCloud } from "./dev/mock-cloud.js";
 import { log } from "./log.js";
 
 async function main(): Promise<void> {
+  if (isMockMode()) {
+    installMockCloud();
+    log("⚠ MOCK MODE — SmartThings cloud is simulated; no real TV will be controlled.");
+  }
   const app = createApp();
   const args = process.argv.slice(2);
 

@@ -8,6 +8,7 @@ import { BrowserWindow } from "electron";
 import { loadConfig, resetConfig } from "../config.js";
 import { hasOAuthClient } from "../domain/oauth.js";
 import { authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "../api/oauth.js";
+import { isMockMode } from "../dev/mock-cloud.js";
 
 export interface AuthStatus {
   // An OAuth client (clientId + clientSecret) is configured. The client fields themselves now
@@ -17,7 +18,14 @@ export interface AuthStatus {
   authorized: boolean;
 }
 
+// Mock mode has no real tokens, so auth state is just this flag. It starts signed in (the fake
+// device list should load immediately), and Sign out / Sign in flip it — the auth UI flow stays
+// testable without real OAuth. The daemon's TV actions keep working regardless: mock mode's
+// token comes from the env, not from this state.
+let mockAuthorized = true;
+
 export async function getAuthStatus(): Promise<AuthStatus> {
+  if (isMockMode()) return { hasClient: true, authorized: mockAuthorized };
   const config = await loadConfig();
   return {
     hasClient: hasOAuthClient(config),
@@ -25,8 +33,13 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   };
 }
 
-// Clear all stored credentials and tokens (the GUI equivalent of `npm run reset`).
+// Clear all stored credentials and tokens (the GUI equivalent of `npm run reset`). In mock mode
+// just flip the fake state — keeping the mock config file preserves the seeded device selection.
 export async function logout(): Promise<void> {
+  if (isMockMode()) {
+    mockAuthorized = false;
+    return;
+  }
   await resetConfig();
 }
 
@@ -58,6 +71,12 @@ export const LOGIN_CANCELLED = Symbol("login-cancelled");
 // tokens are saved (or with LOGIN_CANCELLED if the user closed the window); rejects if the client
 // is missing, on denial, or on timeout.
 export async function login(parent: BrowserWindow | null): Promise<void | typeof LOGIN_CANCELLED> {
+  // Mock mode: succeed instantly instead of opening the real SmartThings approval window (there
+  // is no OAuth client configured, and the fake cloud has no auth server anyway).
+  if (isMockMode()) {
+    mockAuthorized = true;
+    return;
+  }
   const config = await loadConfig();
   if (!hasOAuthClient(config)) {
     throw new Error("Configure your SmartThings client in Settings first.");

@@ -26,6 +26,9 @@ const env = {
   // Electron's warning about that; the production build injects a strict CSP.
   ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
 };
+// `npm run electron:dev:mock` → fake the SmartThings cloud (src/dev/mock-cloud.ts): no
+// credentials or real TV needed.
+if (process.argv.includes("--mock")) env.SMARTTHINGS_MOCK = "1";
 // If inherited (some editor/agent terminals set it), Electron would run main.cjs under plain
 // Node — no `app`, immediate crash. Always launch as a real Electron app.
 delete env.ELECTRON_RUN_AS_NODE;
