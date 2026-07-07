@@ -21,6 +21,7 @@ import {
   isWithinBootWindow,
   TriggerGate,
   withRetry,
+  type ActionResult,
   type HotkeyTarget,
   type Platform,
 } from "./domain/daemon.js";
@@ -58,10 +59,12 @@ const WAKE_RETRY_MS = 3000;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface Daemon {
-  // Wake the TV and switch it to the PC input (with the post-wake retry loop).
-  triggerOn(): Promise<void>;
-  // Turn the TV off (only if on PC input), then put this PC to sleep.
-  triggerOffAndSleep(): Promise<void>;
+  // Wake the TV and switch it to the PC input (with the post-wake retry loop). The result is for
+  // interactive callers (the renderer's power buttons); hotkey/tray/watcher callers ignore it.
+  triggerOn(): Promise<ActionResult>;
+  // Turn the TV off (only if on PC input), then put this PC to sleep. Resolves with the TV-off
+  // result before the PC actually sleeps — sleepPc() runs detached (see triggerOffAndSleep).
+  triggerOffAndSleep(): Promise<ActionResult>;
   // Re-read the configured hotkey combos and apply them to the live key matcher. Called after
   // Settings saves so a changed combo takes effect without restarting the daemon.
   reloadHotkeys(): Promise<void>;
@@ -103,16 +106,16 @@ export async function startDaemon(): Promise<Daemon> {
   // `target`/`accelForLog` scope a per-device hotkey trigger; the public zero-arg calls act on the
   // Settings selection as before. Note: a binding whose every id is stale (TV removed from the
   // account) makes app.switch() throw and churn this retry loop — ~30s of log noise, harmless.
-  async function triggerOn(target?: HotkeyTarget, accelForLog?: string): Promise<void> {
+  async function triggerOn(target?: HotkeyTarget, accelForLog?: string): Promise<ActionResult> {
     const label = hotkeyLabel(accelForLog ?? wakeAccel, PLATFORM);
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
-      return;
+      return { ok: false, error: "A command is already running.", busy: true };
     }
     const ids = await resolveTargetIds(target);
     log(`\n${label} → waking TV and switching to PC...${scopeTag(ids)}`);
     try {
-      await withRetry(
+      const acted = await withRetry(
         () => app.switch(undefined, ids),
         WAKE_ATTEMPTS,
         WAKE_RETRY_MS,
@@ -120,8 +123,10 @@ export async function startDaemon(): Promise<Daemon> {
         (attempt, err) =>
           log(`attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${WAKE_RETRY_MS / 1000}s...`),
       );
+      return acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
     } catch (e) {
       logError(`failed after ${WAKE_ATTEMPTS} attempts: ${e instanceof Error ? e.message : String(e)}`);
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
     } finally {
       gate.release(Date.now());
     }
@@ -129,29 +134,33 @@ export async function startDaemon(): Promise<Daemon> {
 
   // Turn the TV off, then immediately put this PC to sleep (Cmd/Ctrl + Q). Like triggerOn, an
   // optional target scopes a per-device hotkey to its own TVs; the PC sleeps either way.
-  async function triggerOffAndSleep(target?: HotkeyTarget, accelForLog?: string): Promise<void> {
+  async function triggerOffAndSleep(target?: HotkeyTarget, accelForLog?: string): Promise<ActionResult> {
     const label = hotkeyLabel(accelForLog ?? offAccel, PLATFORM);
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
-      return;
+      return { ok: false, error: "A command is already running.", busy: true };
     }
     const ids = await resolveTargetIds(target);
     log(`\n${label} → turning TV off, then sleeping this PC...${scopeTag(ids)}`);
+    let result: ActionResult;
     try {
-      await app.off(ids);
+      const acted = await app.off(ids);
+      result = acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
     } catch (e) {
       logError(`TV off failed: ${e instanceof Error ? e.message : String(e)} — sleeping this PC anyway.`);
+      result = { ok: false, error: e instanceof Error ? e.message : String(e) };
     } finally {
       // Release before suspending: sleepPc()'s child process may not exit (and so not resolve)
       // until the machine resumes, and the resume-time triggerOn must not find the gate busy.
       gate.release(Date.now());
     }
     log("Putting this PC to sleep...");
-    try {
-      await sleepPc();
-    } catch (e) {
+    // Detached for the same reason the gate releases early: awaiting sleepPc() would keep the
+    // renderer's invoke pending through the whole sleep cycle.
+    void sleepPc().catch((e: unknown) => {
       logError(`sleep failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    });
+    return result;
   }
 
   // Read the configured combos and update wakeAccel/offAccel/deviceConfigs. A hotkey that was

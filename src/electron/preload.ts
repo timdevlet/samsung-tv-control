@@ -7,6 +7,7 @@ import type { LogEntry } from "../log.js";
 import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
 import type { STDevice } from "../domain/tv.js";
+import type { ActionResult } from "../domain/daemon.js";
 
 type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
 type DeviceListResult =
@@ -23,8 +24,9 @@ const tvAPI = {
   // Fetch the backlog accumulated before the window opened.
   getHistory: (): Promise<LogEntry[]> => ipcRenderer.invoke("log:history"),
   clearHistory: (): void => ipcRenderer.send("log:clear"),
-  wakeTv: (): void => ipcRenderer.send("action:on"),
-  tvOffSleep: (): void => ipcRenderer.send("action:off"),
+  // Resolves with the action's outcome so the Power screen can show success/error.
+  wakeTv: (): Promise<ActionResult> => ipcRenderer.invoke("action:on"),
+  tvOffSleep: (): Promise<ActionResult> => ipcRenderer.invoke("action:off"),
   // Auth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
   login: (): Promise<AuthResult> => ipcRenderer.invoke("auth:login"),

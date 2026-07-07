@@ -1,0 +1,90 @@
+.power-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  /* Optical centering: nudge the group up so it doesn't sit low under the header. */
+  padding-bottom: 40px;
+}
+
+.power-buttons {
+  display: flex;
+  gap: 48px;
+}
+
+.power-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+
+  .power-label {
+    color: var(--muted);
+    font-size: 13px;
+  }
+}
+
+.power-button {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  color: var(--muted);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+
+  &.on:hover:not(:disabled) {
+    color: var(--success);
+    border-color: var(--success);
+    background: var(--btn-bg);
+  }
+  &.off:hover:not(:disabled) {
+    color: var(--error);
+    border-color: var(--error);
+    background: var(--btn-bg);
+  }
+  &.pending {
+    color: var(--accent);
+    border-color: var(--accent);
+    opacity: 1;
+
+    svg { animation: power-pulse 1.2s ease-in-out infinite; }
+  }
+}
+
+.power-result {
+  min-height: 20px; /* reserved so success/error appearing doesn't shift the buttons */
+  margin: 0;
+  font-size: 14px;
+
+  .working { color: var(--muted); }
+
+  .outcome {
+    display: inline-block;
+    animation: result-pop 0.3s ease-out;
+
+    &.success { color: var(--success); }
+    &.error { color: var(--error); }
+  }
+}
+
+@keyframes result-pop {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes power-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

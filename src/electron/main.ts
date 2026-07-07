@@ -11,6 +11,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } fro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startDaemon, ON_COMBO_LABEL, OFF_COMBO_LABEL, type Daemon } from "../daemon-core.js";
+import type { ActionResult } from "../domain/daemon.js";
 import { createApp } from "../app.js";
 import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
@@ -186,8 +187,10 @@ async function start(): Promise<void> {
   ipcMain.on("log:clear", () => {
     history.length = 0;
   });
-  ipcMain.on("action:on", () => void daemon?.triggerOn());
-  ipcMain.on("action:off", () => void daemon?.triggerOffAndSleep());
+  ipcMain.handle("action:on", (): Promise<ActionResult> | ActionResult =>
+    daemon ? daemon.triggerOn() : { ok: false, error: "Daemon is not running." });
+  ipcMain.handle("action:off", (): Promise<ActionResult> | ActionResult =>
+    daemon ? daemon.triggerOffAndSleep() : { ok: false, error: "Daemon is not running." });
 
   // Auth: the GUI equivalent of `npm run login` / `npm run reset`. The daemon reloads config on
   // every action, so newly-saved tokens take effect on the next Wake without a restart.

@@ -92,7 +92,7 @@ describe("power-on retry loop", () => {
 
     const p = createApp().switch();
     await vi.runAllTimersAsync();
-    await p;
+    await expect(p).resolves.toBe(true); // acted on the selection — daemon reports success
 
     expect(powerOnCount(calls)).toBe(2); // stopped as soon as the TV came on, not all 10
     expect(hasSetInputSource(calls)).toBe(false); // already on HDMI2
@@ -163,7 +163,7 @@ describe("device selection gating", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { createApp: freshCreateApp } = await import("../src/app.js");
-    await freshCreateApp().switch();
+    await expect(freshCreateApp().switch()).resolves.toBe(false); // daemon reports "no TVs selected"
 
     expect(calls.length).toBe(0); // never even listed devices or sent a command
     expect(logs.some((l) => l.includes("No TVs selected"))).toBe(true);
@@ -263,7 +263,7 @@ describe("per-device PC input override", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const { createApp: freshCreateApp } = await import("../src/app.js");
-    await freshCreateApp().off();
+    await expect(freshCreateApp().off()).resolves.toBe(true);
 
     const powerOffs = calls.filter((c) => {
       const cmd = (c.body as { commands?: { capability: string; command: string }[] })?.commands?.[0];

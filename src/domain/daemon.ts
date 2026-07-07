@@ -134,17 +134,16 @@ export function isWithinBootWindow(uptimeSeconds: number, windowSeconds = 120): 
 // finished reconnecting, so the first app.switch() calls (token refresh, device lookup, device
 // commands) can fail until it's back — the delay between tries is what lets the retry window
 // outlast the reconnect.
-export async function withRetry(
-  op: () => Promise<void>,
+export async function withRetry<T>(
+  op: () => Promise<T>,
   attempts: number,
   delayMs: number,
   sleep: (ms: number) => Promise<void>,
   onRetry?: (attempt: number, err: unknown) => void,
-): Promise<void> {
+): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
-      await op();
-      return;
+      return await op();
     } catch (err) {
       if (attempt >= attempts) throw err;
       onRetry?.(attempt, err);
@@ -152,6 +151,13 @@ export async function withRetry(
     }
   }
 }
+
+// Trigger results
+
+// What a daemon trigger reports back to interactive callers (the renderer's power buttons).
+// `ok: true` means the SmartThings commands were accepted for at least one targeted TV;
+// `busy` marks a rejection by the trigger gate rather than a command failure.
+export type ActionResult = { ok: true } | { ok: false; error: string; busy?: boolean };
 
 // Trigger cooldown gate (timer-free state machine)
 

@@ -23,8 +23,9 @@ export interface App {
   login(): Promise<void>;
   // Switch the TV to the PC input, powering it on first if needed. `deviceIds` overrides the
   // Settings selection (used by per-device hotkeys); omitted = all selected TVs.
-  switch(inputOverride?: string, deviceIds?: string[]): Promise<void>;
-  off(deviceIds?: string[]): Promise<void>;
+  // Resolves true when the commands went out, false when no TVs were selected.
+  switch(inputOverride?: string, deviceIds?: string[]): Promise<boolean>;
+  off(deviceIds?: string[]): Promise<boolean>;
   listDevices(): Promise<void>;
   // The TVs on the account (for the Settings selection UI).
   listTVs(): Promise<STDevice[]>;
@@ -198,10 +199,10 @@ export function createApp(): App {
   }
 
   // Switch every targeted TV to its PC input, powering each on first if needed.
-  async function switchInput(inputOverride?: string, deviceIds?: string[]): Promise<void> {
+  async function switchInput(inputOverride?: string, deviceIds?: string[]): Promise<boolean> {
     const { config, st } = await connect(inputOverride);
     const ids = deviceIds ?? resolveDeviceIds(config);
-    await forEachSelected(
+    return forEachSelected(
       config,
       st,
       (deviceId) =>
@@ -231,10 +232,10 @@ export function createApp(): App {
   }
 
   // Turn every targeted TV off (each only if it's on its PC input).
-  async function off(deviceIds?: string[]): Promise<void> {
+  async function off(deviceIds?: string[]): Promise<boolean> {
     const { config, st } = await connect();
     const ids = deviceIds ?? resolveDeviceIds(config);
-    await forEachSelected(
+    return forEachSelected(
       config,
       st,
       (deviceId) => offOne(st, deviceId, inputFor(config, deviceId), deviceTag(config, deviceId, ids)),

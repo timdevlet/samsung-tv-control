@@ -19,7 +19,7 @@ export function useAuth() {
   const pillState: "ok" | "off" | "unknown" =
     status === null ? "unknown" : status.authorized ? "ok" : "off";
   const pillText =
-    status === null ? "Checking…" : status.authorized ? "IN" : status.hasClient ? "N/A" : "N/C";
+    status === null ? "Checking…" : status.authorized ? "" : status.hasClient ? "N/A" : "N/C";
 
   return { status, pillState, pillText, refresh };
 }
