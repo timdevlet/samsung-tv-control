@@ -1,0 +1,75 @@
+.toast-stack {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  width: 300px;
+  z-index: 2; /* Overlay.scss uses z-index: 1 — toasts stay visible over Settings */
+  pointer-events: none; /* only the cards themselves are clickable */
+}
+
+.toast-card {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  pointer-events: auto;
+  /* Override the global button chrome. */
+  display: flex;
+  justify-content: center;
+  padding: 10px 14px;
+  font-size: 13px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  /* Depth effect: each level behind the front card rises 9px, shrinks, and dims.
+     The depth transform transitions here, while the one-shot slide-in animates on
+     the inner .toast-body — so the two never fight over the same element. */
+  transform: translateY(calc(var(--depth) * -9px)) scale(calc(1 - var(--depth) * 0.05));
+  opacity: calc(1 - var(--depth) * 0.18);
+  transition: transform 0.25s ease, opacity 0.25s ease;
+
+  &:hover { background: var(--panel); }
+
+  &.buried {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  &.leaving {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+    pointer-events: none;
+  }
+
+  .toast-body {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    animation: toast-in 0.25s ease-out;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  &.success .dot { background: var(--success); }
+  &.error .dot { background: var(--error); }
+  &.error { color: var(--error); }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

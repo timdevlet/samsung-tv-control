@@ -5,6 +5,7 @@ import { Button } from "./components/Button";
 import { IconButton } from "./components/IconButton";
 import { GearIcon, LogsIcon, TrashIcon } from "./components/icons";
 import { StatusPill } from "./components/StatusPill";
+import { ToastStack } from "./components/ToastStack";
 import { LogFooter } from "./features/log/LogFooter";
 import { LogView } from "./features/log/LogView";
 import { PowerScreen } from "./features/power/PowerScreen";
@@ -12,6 +13,7 @@ import { SettingsOverlay } from "./features/settings/SettingsOverlay";
 import { useAuth } from "./hooks/useAuth";
 import { useLogs } from "./hooks/useLogs";
 import { useOpenSettingsEvent } from "./hooks/useOpenSettingsEvent";
+import { useToasts } from "./hooks/useToasts";
 import "./App.scss";
 
 interface OverlayState {
@@ -22,6 +24,7 @@ interface OverlayState {
 export default function App() {
   const logs = useLogs();
   const auth = useAuth();
+  const toasts = useToasts();
   const [view, setView] = useState<"power" | "logs">("power");
   const [autoScroll, setAutoScroll] = useState(true);
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
@@ -75,7 +78,7 @@ export default function App() {
 
       {signedIn ? (
         view === "power" ? (
-          <PowerScreen />
+          <PowerScreen onToast={toasts.push} />
         ) : (
           <>
             <LogView entries={logs.entries} autoScroll={autoScroll} />
@@ -96,6 +99,8 @@ export default function App() {
           )}
         </div>
       )}
+
+      <ToastStack toasts={toasts.toasts} onDismiss={toasts.dismiss} />
     </>
   );
 }

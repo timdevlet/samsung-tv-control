@@ -58,30 +58,11 @@
 }
 
 .power-result {
-  min-height: 20px; /* reserved so success/error appearing doesn't shift the buttons */
+  min-height: 20px; /* reserved so "Working…" appearing doesn't shift the buttons */
   margin: 0;
   font-size: 14px;
 
   .working { color: var(--muted); }
-
-  .outcome {
-    display: inline-block;
-    animation: result-pop 0.3s ease-out;
-
-    &.success { color: var(--success); }
-    &.error { color: var(--error); }
-  }
-}
-
-@keyframes result-pop {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 @keyframes power-pulse {
