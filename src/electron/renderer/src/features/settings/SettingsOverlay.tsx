@@ -88,20 +88,30 @@ export function SettingsOverlay({
   // the selected TVs), a deviceId = that TV's own settings. Not persisted — every open starts on
   // "All TVs". Tab labels track the alias draft live, so renaming a TV renames its tab.
   const [tvTab, setTvTab] = useState("all");
-  const tvTabOptions =
-    devices.kind === "ready" && devices.devices.length > 0
-      ? [
-          { value: "all", label: "All TVs" },
-          ...devices.devices.map((d) => ({
-            value: d.deviceId,
-            label: form.draft.deviceConfigs[d.deviceId]?.alias || d.label,
-          })),
-        ]
-      : null;
+  // Per-TV tabs exist only once the list is in; until then (loading / signed out / no TVs)
+  // the bar is just "All TVs".
+  const hasDeviceTabs = devices.kind === "ready" && devices.devices.length > 0;
+  const tvTabOptions = [
+    { value: "all", label: "All TVs" },
+    ...(hasDeviceTabs
+      ? devices.devices.map((d) => ({
+          value: d.deviceId,
+          label: form.draft.deviceConfigs[d.deviceId]?.alias || d.label,
+        }))
+      : []),
+  ];
   // A device can disappear between list loads — never leave the UI stranded on a gone tab.
-  const activeTvTab = tvTabOptions?.some((o) => o.value === tvTab) ? tvTab : "all";
+  const activeTvTab = tvTabOptions.some((o) => o.value === tvTab) ? tvTab : "all";
   const activeDeviceConfig =
     activeTvTab === "all" ? undefined : form.draft.deviceConfigs[activeTvTab];
+  // While a TV is enabled for All-TVs actions, the global combo already drives it — an empty
+  // per-TV hotkey field shows it as a "(shared)" placeholder (same idea as PC input) instead of
+  // reading as "no hotkey works here". Unselected TVs are NOT hit by the global pair, so they
+  // keep the plain "Disabled" prompt.
+  const sharedHotkeyPlaceholder = (accelerator: string) =>
+    form.draft.selectedDeviceIds.has(activeTvTab) && accelerator.trim()
+      ? `${accelerator.trim()} (shared)`
+      : undefined;
 
   const [oauthOpen, setOauthOpen] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(authorized);
@@ -166,21 +176,17 @@ export function SettingsOverlay({
               </SettingsGroup>
           }
           <SettingsGroup title="TV control">
-            {/* Tab bar only once the TV list is in — while loading / signed out the group
-                degrades to just the shared fields, and an autosave can't touch per-TV settings. */}
-            {tvTabOptions && (
-              <div className="tv-tabs">
-                <SegmentedControl
-                  ariaLabel="Settings for"
-                  value={activeTvTab}
-                  options={tvTabOptions}
-                  onChange={setTvTab}
-                />
-              </div>
-            )}
+            <div className="tv-tabs">
+              <SegmentedControl
+                ariaLabel="Settings for"
+                value={activeTvTab}
+                options={tvTabOptions}
+                onChange={setTvTab}
+              />
+            </div>
             {activeTvTab === "all" ? (
               <>
-                {tvTabOptions && (
+                {hasDeviceTabs && (
                   <p className="hint">
                     These apply to the TVs enabled below. A TV's own tab can override the input.
                   </p>
@@ -280,6 +286,7 @@ export function SettingsOverlay({
                   <HotkeyField
                     key={`${activeTvTab}-wake`}
                     value={activeDeviceConfig?.wakeHotkey ?? ""}
+                    placeholder={sharedHotkeyPlaceholder(form.draft.wakeHotkey)}
                     onChange={(v) => form.setDeviceConfig(activeTvTab, "wakeHotkey", v)}
                     onValidationError={form.setError}
                   />
@@ -288,6 +295,7 @@ export function SettingsOverlay({
                   <HotkeyField
                     key={`${activeTvTab}-off`}
                     value={activeDeviceConfig?.offHotkey ?? ""}
+                    placeholder={sharedHotkeyPlaceholder(form.draft.offHotkey)}
                     onChange={(v) => form.setDeviceConfig(activeTvTab, "offHotkey", v)}
                     onValidationError={form.setError}
                   />

@@ -57,9 +57,11 @@ export default function App() {
             >
               <LogsIcon />
             </IconButton>
-            <IconButton aria-label="Clear log" title="Clear log" onClick={logs.clear}>
-              <TrashIcon />
-            </IconButton>
+            {view === "logs" && (
+              <IconButton aria-label="Clear log" title="Clear log" onClick={logs.clear}>
+                <TrashIcon />
+              </IconButton>
+            )}
             <IconButton aria-label="Settings" title="Settings" onClick={() => void openSettings()}>
               <GearIcon />
             </IconButton>

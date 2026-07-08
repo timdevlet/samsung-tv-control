@@ -10,11 +10,15 @@ export function HotkeyField({
   value,
   onChange,
   onValidationError,
+  placeholder,
 }: {
   value: string;
   onChange: (accelerator: string) => void;
   // "needs a modifier" goes to the shared settings error line; null clears it on a valid combo.
   onValidationError: (message: string | null) => void;
+  // Shown while the field is empty and idle — a per-TV field uses it to surface the shared
+  // (All-TVs) combo that still acts on the TV. Default: the "Disabled" prompt.
+  placeholder?: string;
 }) {
   const capture = useHotkeyCapture({
     onCapture: (accelerator) => {
@@ -31,7 +35,11 @@ export function HotkeyField({
         type="text"
         readOnly
         value={value}
-        placeholder={capture.capturing ? "Press a combo…" : "Disabled — click, then press a combo"}
+        placeholder={
+          capture.capturing
+            ? "Press a combo…"
+            : placeholder ?? "Disabled — click, then press a combo"
+        }
         onClick={capture.start}
       />
       <IconButton

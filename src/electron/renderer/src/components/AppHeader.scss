@@ -28,4 +28,13 @@
     flex: none;
     white-space: nowrap;
   }
+
+  /* Header icon buttons render bare — no border or fill until hovered/toggled. */
+  .icon-button {
+    border: none;
+    background: transparent;
+
+    &:hover { background: var(--btn-hover); }
+    &[aria-pressed="true"] { background: var(--btn-hover); }
+  }
 }
