@@ -1,214 +1,191 @@
-# Samsung TV → PC (SmartThings)
+# Samsung TV Control
 
-A small Node/TypeScript app that, in one command:
+A small desktop app (and CLI) that wakes your Samsung TV and switches its input to
+your PC — from a global hotkey, a tray menu, or a single click — and puts everything
+back to sleep when you're done. It drives the TV entirely through the **SmartThings
+cloud API**: no local network access, Wake-on-LAN, or websocket pairing required.
 
-1. **Finds** your Samsung TV in your SmartThings account,
-2. **Turns it on**, and
-3. **Switches the input to PC** (HDMI 3 by default).
+![The TV Control window on the Power screen, dark theme](assets/docs/screenshot-power-dark.png)
 
-It drives the TV entirely through the **SmartThings cloud API** — no local network
-access, Wake-on-LAN, or websocket pairing. This is the robust path for recent
-(2024–2026) Tizen firmware, where local control and Wake-on-LAN over Wi-Fi are
-unreliable. The TV's LAN IP is irrelevant here; commands are routed by SmartThings
-device id.
+## Why this app exists
 
-## Prerequisites
+If you use a Samsung TV as a monitor, the daily ritual is tedious: turn the TV on,
+grab the remote, cycle to the right HDMI input, and reverse all of it when you walk
+away. Physical remotes and older automations don't help much either — on recent
+(2024–2026) Tizen firmware, **local control and Wake-on-LAN over Wi-Fi are
+unreliable**, so IP-based tools tend to break.
 
-- Node 18+ (uses built-in `fetch`). Developed on Node 26.
-- The TV added to your account in the **SmartThings app** (it must show up and be
-  controllable there). The TV needs to be plugged in / in networked standby so the
-  cloud can wake it.
-- A **SmartThings Personal Access Token (PAT)** — see below.
+This app takes the robust path: it routes every command through SmartThings by device
+id, so the TV's LAN address is irrelevant and the cloud can wake it from networked
+standby. The result is a one-gesture flow:
 
-### Get a token
+- **Sitting down at the PC?** One hotkey wakes the TV and switches it to your PC input.
+- **Done for the day?** One hotkey turns the TV off and sleeps the PC.
+- **PC woke from sleep?** The TV comes back on and switches to PC automatically.
 
-1. Go to <https://account.smartthings.com/tokens> → **Generate new token**.
-2. Authorize at least the **Devices** scopes: *List all devices*, *See all devices*
-   (retrieve status), and *Execute commands on all devices*.
-3. Copy the token.
+It runs quietly in the system tray so those hotkeys work any time after boot.
 
-> ⚠️ **Token lifetime:** PATs created after **Dec 30, 2024 expire after 24 hours.**
-> A PAT will work great for testing but stops working the next day; you'd generate a
-> fresh one. For a permanent setup the proper fix is an OAuth flow (auto-refreshing
-> tokens) — ask and I can add it.
+## Main features
 
-## Setup
+- **Power screen** — two big buttons: *Power ON* (wake TV → switch to PC) and
+  *Power OFF* (TV off → sleep this PC).
+- **Global hotkeys** — fire the two actions from anywhere, no window focus needed.
+  Defaults: **Cmd + Ctrl + E** / **Cmd + Ctrl + Q** on macOS, **Ctrl + Alt + E** /
+  **Ctrl + Alt + Q** on Windows/Linux. Both are rebindable in Settings.
+- **Auto-wake on resume** — when the PC wakes from sleep, the TV turns back on and
+  switches to PC automatically. Works on every platform, no extra setup.
+- **Runs in the tray** — closing the window hides it to the tray; the daemon keeps
+  running. The tray menu exposes both actions and Settings.
+- **Live log window** — watch every command stream in, with syntax-highlighted
+  timestamps, device names, and results.
+- **In-app sign-in** — connect your SmartThings account through an OAuth flow inside
+  the app; tokens are stored and refreshed automatically.
+- **Multi-TV aware** — pick which TV(s) commands target from your account's device
+  list, with an optional per-TV input override.
+- **Light / dark / system theme** — dark by default (shown above).
+- **Mock mode** — a built-in fake SmartThings cloud lets you run and develop the whole
+  app without credentials or a real TV.
+- **CLI** — the same actions scriptable from a terminal (`npm start`, `npm run devices`, …).
+
+![The TV Control log window streaming a wake sequence, dark theme](assets/docs/screenshot-logs-dark.png)
+
+## Before the first launch
+
+You need three things in place before the app can control anything.
+
+1. **Node 20 or newer** (uses built-in `fetch`).
+
+2. **Your TV added to SmartThings.** Open the **SmartThings mobile app** and make sure
+   the TV appears and is controllable there (you can power it on and change inputs).
+   Leave the TV plugged in / in networked standby so the cloud can wake it. If it
+   doesn't work in the SmartThings app, it won't work here.
+
+3. **A way to authenticate.** Pick one:
+
+   - **OAuth (recommended, permanent).** Create a SmartThings *OAuth-In* app in the
+     [SmartThings Developer Workspace](https://developer.smartthings.com/) (or via the
+     SmartThings CLI) to get a **Client ID** and **Client Secret**. Use redirect URI
+     `https://httpbin.org/get` and scopes `r:devices:* x:devices:* r:locations:*`
+     (the app's defaults). You'll paste the Client ID/Secret into **Settings →
+     Advanced** and click **Sign in**. Tokens are stored and auto-refresh, so an
+     unattended startup launch keeps working across reboots.
+
+     > A refresh token expires only after 30 days of non-use; normal daily use keeps it alive.
+
+   - **Personal Access Token (quick test only).** Generate one at
+     <https://account.smartthings.com/tokens> with the *Devices* scopes (list, see
+     status, execute commands) and set `SMARTTHINGS_TOKEN` in your environment.
+     ⚠️ **PATs created after Dec 30, 2024 expire after 24 hours**, so this is fine for a
+     one-off test but not for a permanent setup — use OAuth for that.
+
+Then launch the app, open **Settings**, sign in, pick your TV, and set the **PC input**
+(e.g. `HDMI3` — matched by input id or by label like `PC`).
+
+## Getting started — development
 
 ```sh
-cd tv
+git clone https://github.com/timdevlet/samsung-tv-control.git
+cd samsung-tv-control
 npm install
 ```
 
-Provide the token via env var (recommended, easy to refresh daily):
+Run the desktop app in dev mode (tray + log window, renderer hot-reloads on edit):
 
 ```sh
-export SMARTTHINGS_TOKEN="<your-token>"
+npm run electron:dev        # build main/preload, start Vite, launch Electron
 ```
 
-…or copy the template and put `"token": "<your-token>"` in it:
+**No SmartThings account handy?** Run in **mock mode** — a stateful in-process fake of
+the SmartThings cloud, so the whole app works with no credentials and no real TV:
 
 ```sh
-cp smartthings-config.example.json smartthings-config.json
+npm run electron:dev:mock   # same app, cloud is simulated
 ```
 
-`smartthings-config.json` is git-ignored — it holds your token/secrets and is never committed.
-
-## Usage
+Other useful scripts:
 
 ```sh
-npm start              # find TV → turn on → switch to the configured input
-npm start -- --hdmi 3  # same, but switch to HDMI 3 this run (overrides pcInput)
-npm run login          # one-time OAuth authorize (auto-refreshing token)
-npm run devices        # list account devices + capabilities (to identify the TV)
-npm run reset          # forget the cached device id / token
-npm run electron:dev   # run the desktop tray app (global hotkeys + log window)
+npm test                    # run the Vitest suite (uses the mocked cloud)
+npm run typecheck           # type-check main + renderer
+npm start                   # CLI: wake TV → switch to PC, then exit
+npm start -- --hdmi 3       # CLI: switch to HDMI 3 this run
+npm run devices             # CLI: list account devices + capabilities
+npm run reset               # forget cached device id / stored tokens
 ```
 
-### Global hotkeys
+### Project layout
 
-The desktop app (`npm run electron:dev`, or a packaged build) registers two global hotkeys that
-fire from anywhere — you don't need the window focused:
+| Path | What lives there |
+| --- | --- |
+| `src/api/` | SmartThings REST client + OAuth token exchange |
+| `src/domain/` | Pure logic (config, TV selection, hotkeys, CLI parsing) — unit-tested |
+| `src/daemon-core.ts` | The background daemon: hotkeys, auto-wake, boot reconcile |
+| `src/electron/` | Electron main, preload, and the React renderer (`renderer/`) |
+| `src/dev/` | Mock cloud + fixtures for `SMARTTHINGS_MOCK=1` |
+| `tests/` | Vitest suite |
 
-| Action | macOS | Windows / Linux |
-| --- | --- | --- |
-| Wake the TV + switch to PC | **Cmd + Ctrl + E** | **Ctrl + Alt + E** |
-| Turn the TV off, then sleep this PC | **Cmd + Ctrl + Q** | **Ctrl + Alt + Q** |
+## Deployment — building distributables
 
-Both combos are **configurable in Settings** (click the field, press your combo); an empty field
-unbinds the action.
-
-The off-and-sleep hotkey turns the TV off — but **only if it's currently on the PC input**, so
-it won't switch off a TV you've put on another source — then waits 2 seconds and puts this PC to
-sleep (`pmset sleepnow` on macOS, `SetSuspendState` on Windows, `systemctl suspend` on Linux).
-
-The app also **wakes the TV automatically when this PC resumes from sleep**. It detects wake
-with a simple heartbeat: a timer ticks every few seconds, and a large gap between ticks means the
-process was frozen (the PC slept). On wake it turns the TV on (only if it was off) and switches to
-PC, then pauses detection for 5 minutes so it can't re-fire. This works on all platforms — no
-extra setup.
-
-Hotkeys use Electron's built-in [`globalShortcut`](https://www.electronjs.org/docs/latest/api/global-shortcut)
-(RegisterHotKey on Windows, a Carbon hotkey on macOS): the OS matches the combo system-wide and
-calls the app directly. No native module, and the registration survives sleep/wake on its own.
-
-> **Conflicts:** if a combo is already claimed by the OS or another app, registration fails and
-> the log notes it — pick a different combo in Settings.
-
-`--hdmi <n>` (n = 1–4) picks the input for that run without editing config; the
-shorthands `--hdmi=3` and `--hdmi3` also work. Without it, `pcInput` from
-`smartthings-config.json` is used.
-
-First run finds the TV and caches its device id in `smartthings-config.json`, so
-later runs skip the lookup.
-
-## Desktop app (Electron tray + log window)
-
-The same daemon can run as a **Windows desktop app**: it launches, drops to the **system
-tray**, and opens a **window that streams the live log**. Closing the window hides it back to
-the tray (the daemon keeps running); quit from the tray menu to actually exit. The tray menu
-also exposes the two TV actions, and the window has **Wake TV → PC** / **TV off + sleep**
-buttons so you don't need the hotkeys.
-
-The daemon core (global hotkeys, sleep/wake auto-wake, boot reconcile) runs inside the app — the
-window only mirrors the log output and adds buttons.
+The app has **no native modules** (global hotkeys use Electron's built-in
+`globalShortcut`), so there's nothing to rebuild and no cross-compile caveat — build on
+the target OS (or its CI).
 
 ```sh
-npm run electron:dev   # build + launch the app locally (tray + log window)
-npm run dist:win       # build a Windows installer + portable .exe  → release/
-npm run dist:dir       # unpacked build for quick local testing     → release/win-unpacked/
+npm run dist:win   # Windows: NSIS installer + portable .exe   → release/
+npm run dist:dir   # Unpacked build for quick local testing     → release/
+npm run dist       # Default target for the current platform (dmg on macOS, AppImage on Linux)
 ```
 
 `npm run dist:win` produces, in `release/`:
 
-- **`Samsung TV Control Setup <version>.exe`** — NSIS installer (creates Start-menu / desktop
+- **`Samsung TV Control Setup <version>.exe`** — NSIS installer (Start-menu / desktop
   shortcuts; install dir is chooseable).
-- **`Samsung TV Control <version>.exe`** — single-file **portable** exe (no install; just
-  double-click).
+- **`Samsung TV Control <version>.exe`** — single-file **portable** exe (no install).
 
-### Where the config lives in the packaged app
+### Where the packaged app keeps its config
 
-The CLI/daemon read `smartthings-config.json` from the repo root, but a packaged app's files are
-inside a read-only archive. So the desktop app instead reads/writes:
+The CLI reads `smartthings-config.json` from the repo root, but a packaged app's files
+are inside a read-only archive, so the desktop app reads/writes elsewhere:
 
-- **Portable exe:** `smartthings-config.json` **next to the .exe** — drop your authorized config
-  file beside it, or it's created there on first save.
+- **Portable exe:** `smartthings-config.json` next to the `.exe`.
 - **Installer:** `%APPDATA%\Samsung TV Control\smartthings-config.json`.
 
-Either way you can override the location with the `SMARTTHINGS_CONFIG_PATH` env var, or just set
-`SMARTTHINGS_TOKEN`. Authorize once with `npm run login` (in the repo) and copy the resulting
-`smartthings-config.json` to the location above — there's no in-app OAuth UI yet.
+Override the location with `SMARTTHINGS_CONFIG_PATH`, or just set `SMARTTHINGS_TOKEN`.
 
-### Building the Windows exe
+### Run on startup
 
-> The app has **no native modules** (global hotkeys use Electron's built-in `globalShortcut`), so
-> there's nothing to rebuild and no cross-compile caveat. Run `npm install` then `npm run dist:win`
-> on a Windows machine (or Windows CI) to produce the installer + portable exe.
-
-## Run on Windows startup
-
-Launch the **desktop app** automatically when you log in so the global hotkeys work any time after
-boot (it also auto-wakes the TV on resume and reconciles at boot). Build it once with
-`npm run dist:win`, then point a startup entry at the installed/portable `Samsung TV Control.exe`.
-
-> ⚠️ **Use OAuth for the token, not a PAT.** A startup launch runs unattended, so a 24h PAT would
-> break the next day. Run `npm run login` once first — it stores an **auto-refreshing** token in
-> `smartthings-config.json` that survives reboots. For a packaged app, copy that file next to the
-> portable `.exe` (or to `%APPDATA%\Samsung TV Control\`); see [Where the config lives](#where-the-config-lives-in-the-packaged-app).
-
-### Option A — Startup folder (simplest)
-
-1. Press **Win + R**, type `shell:startup`, press Enter. This opens your per-user
-   Startup folder; anything in it runs at log on.
-2. Right-click `Samsung TV Control.exe` → **Send to → Desktop (create shortcut)**, then move that
-   shortcut into the Startup folder. (A *shortcut* there, rather than the exe itself, keeps the
-   install in place.)
-3. Log out and back in to test — the app launches to the tray, registers the hotkeys, and shows
-   its log window.
-
-### Option B — Task Scheduler (more robust)
-
-Better when you want auto-restart on failure or to run at a specific event.
-
-1. Open **Task Scheduler** → **Create Task…** (not *Basic*).
-2. **General:** name it `Samsung TV Control`; tick **Run only when user is logged on**.
-3. **Triggers:** New → **Begin the task: At log on** → your user.
-4. **Actions:** New → **Start a program** → **Program/script:** the full path to
-   `Samsung TV Control.exe`.
-5. **Settings:** optionally enable **If the task fails, restart every 1 minute**.
-
-To switch the TV at boot *without* the persistent app, point a startup entry at `npm start`
-(one-shot: wakes the TV and switches to PC, then exits) instead.
-
-## Configuration — `smartthings-config.json`
-
-Created/updated automatically. Editable fields:
-
-| Field | Meaning |
-| --- | --- |
-| `token` | SmartThings PAT (or use `SMARTTHINGS_TOKEN`; env wins). Keep private. |
-| `deviceId` | Cached SmartThings device id of the TV. |
-| `deviceLabel` | TV's label (informational). |
-| `pcInput` | Input the PC is on. Matched by id (`"HDMI3"`) then by label (`"PC"`). Default `"HDMI3"`. |
+Launch the app at login so the hotkeys and auto-wake are always available. On Windows,
+drop a shortcut to `Samsung TV Control.exe` into the Startup folder (**Win + R** →
+`shell:startup`), or create a **Task Scheduler** task triggered *At log on*. Use **OAuth
+tokens, not a PAT**, for an unattended launch — a 24h PAT would break the next day.
 
 ## Troubleshooting
 
-- **401 / token rejected.** The token is invalid or expired (see the 24h note).
-  Generate a new one and re-export `SMARTTHINGS_TOKEN`.
-- **TV not found.** Run `npm run devices` to see what the account exposes. The app
-  picks a device whose main component has an input-source capability
-  (`samsungvd.mediaInputSource` or `mediaInputSource`); if your TV's id differs, set
-  `deviceId` manually in `smartthings-config.json`.
-- **Input won't change.** Run `npm run devices` and confirm the TV lists an
-  input-source capability. The supported input ids/labels come straight from the TV;
-  set `pcInput` to the exact id or label shown for the PC port.
-- **TV won't turn on.** Make sure it powers on from the SmartThings app itself; if
-  that fails, the TV isn't reachable by the cloud (check its network/standby setting).
+- **401 / token rejected.** The token is invalid or expired. Re-sign in (OAuth) or
+  regenerate and re-export `SMARTTHINGS_TOKEN` (PAT).
+- **TV not found.** Run `npm run devices` to see what your account exposes; the app
+  picks a device with an input-source capability (`samsungvd.mediaInputSource` or
+  `mediaInputSource`). Set the target explicitly in Settings if needed.
+- **Input won't change.** Confirm the TV lists an input-source capability
+  (`npm run devices`) and set the PC input to the exact id/label shown for that port.
+- **TV won't turn on.** Verify it powers on from the SmartThings app itself; if that
+  fails, the cloud can't reach it (check its network / standby setting).
+- **Hotkey does nothing.** The combo may be claimed by the OS or another app —
+  registration then fails and the log notes it. Pick a different combo in Settings.
 
 ## How it works
 
-SmartThings REST API (`https://api.smartthings.com/v1`):
+Everything goes through the SmartThings REST API (`https://api.smartthings.com/v1`):
 
-- `GET /devices` — find the TV (device with an input-source capability).
+- `GET /devices` — find the TV (a device with an input-source capability).
 - `GET /devices/{id}/status` — read power state, current input, and supported inputs.
-- `POST /devices/{id}/commands` — `switch.on` to power on, then
-  `setInputSource("HDMI3")` to switch to the PC.
+- `POST /devices/{id}/commands` — `switch.on` to power on, then `setInputSource("HDMI3")`
+  to switch to the PC.
+
+The daemon core registers the global hotkeys, detects resume-from-sleep with a heartbeat
+timer, and drives the TV; the window only mirrors the log stream and offers the actions
+as buttons.
+
+## License
+
+[MIT](LICENSE)
