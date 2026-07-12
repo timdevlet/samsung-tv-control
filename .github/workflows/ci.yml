@@ -17,8 +17,8 @@ jobs:
     name: Lint (typecheck)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -29,8 +29,8 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -46,20 +46,20 @@ jobs:
         include:
           - os: windows-latest
             name: exe (Windows)
-            dist: npm run dist:win
+            dist: npm run dist:win -- --publish never
             artifact: windows-installer
             path: |
               release/*.exe
           - os: macos-latest
             name: dmg (macOS)
-            dist: npm run dist -- --mac
+            dist: npm run dist -- --mac --publish never
             artifact: macos-dmg
             path: |
               release/*.dmg
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
