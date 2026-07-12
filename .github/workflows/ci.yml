@@ -87,6 +87,7 @@ jobs:
       - name: Publish binaries to a GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           mapfile -t files < <(find dist -type f \( -name '*.exe' -o -name '*.dmg' \) | sort)
