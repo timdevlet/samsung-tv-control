@@ -8,12 +8,11 @@
 // stays external (provided by the runtime, not inlined).
 
 import esbuild from "esbuild";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, copyFile, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import zlib from "node:zlib";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { drawAppIcon, drawTraySilhouette } from "./tv-icon.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "dist-electron");
@@ -126,7 +125,100 @@ function encodeICO(png, size) {
   return Buffer.concat([header, entry, png]);
 }
 
-// --- area-average downscaler (no image deps) --------------------------------------------------
+// --- minimal PNG decoder + area-average downscaler (no image deps) ---------------------------
+// Decode an 8-bit, non-interlaced PNG (color types 0/2/3/4/6) to a flat RGBA buffer. Enough to
+// read the hand-authored source icon; not a general-purpose decoder.
+function decodePNG(buf) {
+  let pos = 8; // skip the 8-byte signature
+  let width, height, bitDepth, colorType, interlace;
+  let palette = null;
+  let trns = null;
+  const idat = [];
+  while (pos < buf.length) {
+    const len = buf.readUInt32BE(pos);
+    const type = buf.toString("ascii", pos + 4, pos + 8);
+    const data = buf.subarray(pos + 8, pos + 8 + len);
+    if (type === "IHDR") {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colorType = data[9];
+      interlace = data[12];
+    } else if (type === "PLTE") palette = data;
+    else if (type === "tRNS") trns = data;
+    else if (type === "IDAT") idat.push(data);
+    else if (type === "IEND") break;
+    pos += 12 + len; // 4 len + 4 type + len data + 4 crc
+  }
+  if (bitDepth !== 8) throw new Error(`unsupported PNG bit depth: ${bitDepth}`);
+  if (interlace !== 0) throw new Error("interlaced PNG not supported");
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[colorType];
+  if (!channels) throw new Error(`unsupported PNG color type: ${colorType}`);
+
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+  const out = Buffer.alloc(height * stride);
+  let prev = Buffer.alloc(stride);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const line = raw.subarray(y * (stride + 1) + 1, y * (stride + 1) + 1 + stride);
+    const cur = out.subarray(y * stride, y * stride + stride);
+    for (let i = 0; i < stride; i++) {
+      const a = i >= channels ? cur[i - channels] : 0; // byte to the left
+      const b = prev[i]; // byte above
+      const c = i >= channels ? prev[i - channels] : 0; // byte above-left
+      let v = line[i];
+      if (filter === 1) v += a;
+      else if (filter === 2) v += b;
+      else if (filter === 3) v += (a + b) >> 1;
+      else if (filter === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      } else if (filter !== 0) throw new Error(`unknown PNG filter: ${filter}`);
+      cur[i] = v & 0xff;
+    }
+    prev = cur;
+  }
+
+  // expand whatever color type we got into straight RGBA
+  const rgba = Buffer.alloc(width * height * 4);
+  for (let p = 0; p < width * height; p++) {
+    let r, g, b, a = 255;
+    if (colorType === 2) [r, g, b] = [out[p * 3], out[p * 3 + 1], out[p * 3 + 2]];
+    else if (colorType === 6)
+      [r, g, b, a] = [out[p * 4], out[p * 4 + 1], out[p * 4 + 2], out[p * 4 + 3]];
+    else if (colorType === 0) r = g = b = out[p];
+    else if (colorType === 4) [r, g, b, a] = [out[p * 2], out[p * 2], out[p * 2], out[p * 2 + 1]];
+    else {
+      const idx = out[p]; // palette index
+      [r, g, b] = [palette[idx * 3], palette[idx * 3 + 1], palette[idx * 3 + 2]];
+      if (trns && idx < trns.length) a = trns[idx];
+    }
+    rgba.set([r, g, b, a], p * 4);
+  }
+  return { width, height, rgba };
+}
+
+// Make the white background transparent, in place. Alpha is derived from how far each pixel is
+// from pure white: pixels at/above WHITE stay fully transparent, pixels at/below WHITE-RANGE stay
+// fully opaque, and the band between gets a proportional alpha. This anti-aliased ramp (rather than
+// a hard threshold) softens the halo where the dark artwork meets the white background.
+function keyOutWhite(rgba) {
+  const WHITE = 250; // channel value at/above which a pixel is considered background
+  const RANGE = 12; // how many levels below WHITE fade from transparent to opaque
+  for (let p = 0; p < rgba.length; p += 4) {
+    const r = rgba[p], g = rgba[p + 1], b = rgba[p + 2];
+    // distance from white = how dark the least-white channel is (max keeps colored edges opaque)
+    const dist = WHITE - Math.min(r, g, b);
+    if (dist <= 0) rgba[p + 3] = 0;
+    else if (dist >= RANGE) rgba[p + 3] = 255;
+    else rgba[p + 3] = Math.round((dist / RANGE) * 255);
+  }
+}
+
 // Downscale an RGBA buffer with box (area-average) sampling — best quality for shrinking a large
 // source to small icon sizes. Color is averaged premultiplied by alpha so transparent pixels
 // don't bleed their (arbitrary) color into the result.
@@ -166,32 +258,44 @@ async function generateIcons() {
   await mkdir(buildDir, { recursive: true });
   await mkdir(out, { recursive: true });
 
-  // All icon artwork is drawn procedurally (see scripts/tv-icon.mjs): hard-edged shapes at a
-  // large master size, downscaled here with the box filter so the edges come out anti-aliased.
-  const APP_MASTER = 2048; // 4x/8x supersample for the 512/256 outputs
-  const appSrc = drawAppIcon(APP_MASTER);
-  const appIcon = (size) => encodePNG(size, resizeRGBA(appSrc, APP_MASTER, APP_MASTER, size));
+  // App icon: resample the hand-authored source image down to each required size.
+  const src = decodePNG(await readFile(path.join(buildDir, "icon-source.png")));
+  // The source has an opaque white background; key it out so the icon is transparent.
+  // Done at full resolution before resizing so the anti-aliased alpha survives the
+  // (premultiplied) downscale rather than producing a hard, haloed edge.
+  keyOutWhite(src.rgba);
+  const appIcon = (size) => encodePNG(size, resizeRGBA(src.rgba, src.width, src.height, size));
 
-  // One tray master serves every size: 480 divides evenly into 16/24/32/48, so the box filter
-  // sees a uniform footprint at each scale.
-  const TRAY_MASTER = 480;
-  const trayBlack = drawTraySilhouette(TRAY_MASTER, [0, 0, 0, 255]);
-  const trayWhite = drawTraySilhouette(TRAY_MASTER, [255, 255, 255, 255]);
-  const tray = (src, size) => encodePNG(size, resizeRGBA(src, TRAY_MASTER, TRAY_MASTER, size));
+  // macOS tray template: a black controller shape on a transparent background (image-black.png is
+  // already RGBA with real alpha, so no white-keying). Recolored to black while keeping the source
+  // alpha as the shape mask; macOS recolors the template to match the menu bar at runtime.
+  const traySrc = decodePNG(await readFile(path.join(root, "image-black.png")));
+  const trayTemplate = (size) => {
+    const rgba = resizeRGBA(traySrc.rgba, traySrc.width, traySrc.height, size);
+    for (let p = 0; p < rgba.length; p += 4) {
+      rgba[p] = 0;
+      rgba[p + 1] = 0;
+      rgba[p + 2] = 0;
+    }
+    return encodePNG(size, rgba);
+  };
 
-  await writeFile(path.join(buildDir, "icon.png"), appIcon(512)); // electron-builder mac/linux (requires >= 512)
-  await writeFile(path.join(buildDir, "icon.ico"), encodeICO(appIcon(256), 256)); // electron-builder win (256 max)
-  await writeFile(path.join(out, "icon.png"), appIcon(256)); // BrowserWindow icon
-  // macOS tray template (tray.png/@2x): black silhouette the OS recolors to match the menu bar.
-  // 16pt base + 32px @2x retina; Electron auto-loads the @2x file by name.
-  await writeFile(path.join(out, "tray.png"), tray(trayBlack, 16));
-  await writeFile(path.join(out, "tray@2x.png"), tray(trayBlack, 32));
-  // Windows tray variants: white silhouette at 16/24/32/48px covering 100/150/200/300% display
-  // scaling. Electron auto-loads @2x/@3x by name, while main.ts attaches the 1.5x rep.
-  await writeFile(path.join(out, "tray-white.png"), tray(trayWhite, 16));
-  await writeFile(path.join(out, "tray-white@1.5x.png"), tray(trayWhite, 24));
-  await writeFile(path.join(out, "tray-white@2x.png"), tray(trayWhite, 32));
-  await writeFile(path.join(out, "tray-white@3x.png"), tray(trayWhite, 48));
+  const png512 = appIcon(512); // electron-builder requires mac/linux icon >= 512x512
+  const png256 = appIcon(256);
+
+  await writeFile(path.join(buildDir, "icon.png"), png512); // electron-builder mac/linux
+  await writeFile(path.join(buildDir, "icon.ico"), encodeICO(png256, 256)); // electron-builder win (256 max)
+  await writeFile(path.join(out, "icon.png"), png256); // BrowserWindow icon
+  // macOS tray template (tray.png/@2x) is generated from image-black.png; the OS recolors it to
+  // match the menu bar. 16pt base + 32px @2x retina; Electron auto-loads the @2x file by name.
+  await writeFile(path.join(out, "tray.png"), trayTemplate(16));
+  await writeFile(path.join(out, "tray@2x.png"), trayTemplate(32));
+  // Windows tray variants are pre-rendered standing files (gray, light->dark gradient) committed in
+  // assets/tray/ — copied as-is, not generated at build time. 16/24/32/48px cover 100/150/200/300%
+  // display scaling; Electron auto-loads @2x/@3x by name, while main.ts attaches the 1.5x rep.
+  for (const name of ["tray-white.png", "tray-white@1.5x.png", "tray-white@2x.png", "tray-white@3x.png"]) {
+    await copyFile(path.join(root, "assets", "tray", name), path.join(out, name));
+  }
 }
 
 // --- run -------------------------------------------------------------------------------------

@@ -129,13 +129,12 @@ function openSettings(): void {
 }
 
 function buildTray(): void {
-  // Tray glyph (a TV with a power symbol) is drawn procedurally at build time — see
-  // generateIcons in scripts/build-electron.mjs and scripts/tv-icon.mjs. macOS loads the black
-  // silhouette and marks it a template image so the system recolors it to match the menu bar
-  // (white on dark, inverting on click). Windows ignores template images, so there we load the
-  // white silhouette directly — it shows white on the (typically dark) taskbar. The 16px base +
-  // @2x are auto-loaded by name; the 150% (24px) size is added explicitly below since Electron's
-  // @Nx convention skips 1.5x.
+  // Tray glyph (a switch/toggle) is generated at build time from one source — see
+  // renderSwitchIcon in scripts/build-electron.mjs. macOS loads the black silhouette and marks it
+  // a template image so the system recolors it to match the menu bar (white on dark, inverting on
+  // click). Windows ignores template images, so there we load the white silhouette directly — it
+  // shows white on the (typically dark) taskbar. The 16px base + @2x are auto-loaded by name; the
+  // 150% (24px) size is added explicitly below since Electron's @Nx convention skips 1.5x.
   const isMac = process.platform === "darwin";
   const trayImg = nativeImage.createFromPath(
     path.join(__dirname, isMac ? "tray.png" : "tray-white.png"),

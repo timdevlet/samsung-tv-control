@@ -1,5 +1,4 @@
 import type { ButtonHTMLAttributes } from "react";
-import { TvFrame } from "./icons";
 import "./IconButton.scss";
 
 type IconButtonProps = {
@@ -19,13 +18,8 @@ export function IconButton({ className, children, ...rest }: IconButtonProps) {
 
 export function XIcon() {
   return (
-    <TvFrame size={14}>
-      <path
-        d="M6.25 5.25l3.5 3.5M9.75 5.25l-3.5 3.5"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-      />
-    </TvFrame>
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
