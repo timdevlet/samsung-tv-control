@@ -1,7 +1,7 @@
 import { readFile, writeFile, unlink } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { mergeConfig, defaultConfig, resolveStaticToken, type TVConfig } from "./domain/config.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, type TVConfig } from "./domain/config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -42,6 +42,21 @@ export async function resetConfig(): Promise<void> {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
+}
+
+// Sign out without forgetting the OAuth client: clear tokens but keep clientId/clientSecret/
+// redirectUri (and all preferences), then rewrite the file. If no config file exists yet there
+// is nothing signed in, so this is a no-op rather than writing a defaults-only file.
+export async function signOut(): Promise<void> {
+  let raw: string;
+  try {
+    raw = await readFile(configPath(), "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  const config = mergeConfig(JSON.parse(raw) as Partial<TVConfig> & { secret?: string });
+  await saveConfig(clearTokens(config));
 }
 
 // Token from the environment takes precedence over the config file.

@@ -5,7 +5,7 @@
 // token exchange, exactly as the CLI does, so both paths write the same smartthings-config.json.
 
 import { BrowserWindow } from "electron";
-import { loadConfig, resetConfig } from "../config.js";
+import { loadConfig, signOut } from "../config.js";
 import { hasOAuthClient } from "../domain/oauth.js";
 import { authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "../api/oauth.js";
 import { isMockMode } from "../dev/mock-cloud.js";
@@ -33,14 +33,15 @@ export async function getAuthStatus(): Promise<AuthStatus> {
   };
 }
 
-// Clear all stored credentials and tokens (the GUI equivalent of `npm run reset`). In mock mode
-// just flip the fake state — keeping the mock config file preserves the seeded device selection.
+// Sign out: clear the OAuth tokens but keep the OAuth client (clientId/clientSecret/redirectUri)
+// and preferences, so signing back in needs no re-entry. In mock mode just flip the fake state —
+// keeping the mock config file preserves the seeded device selection.
 export async function logout(): Promise<void> {
   if (isMockMode()) {
     mockAuthorized = false;
     return;
   }
-  await resetConfig();
+  await signOut();
 }
 
 // Pull the OAuth `code` (or an `error`) out of a redirect URL, but only once navigation has

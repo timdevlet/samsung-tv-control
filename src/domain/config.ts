@@ -102,6 +102,18 @@ export function resolveStaticToken(config: TVConfig, envToken: string | undefine
   return envToken?.trim() || config.token;
 }
 
+// Sign out: drop everything that identifies the signed-in account (OAuth tokens + the legacy
+// static token) while keeping the OAuth client (clientId/clientSecret/redirectUri/scopes) and
+// all user preferences, so the next sign-in reuses the configured client with no re-entry.
+export function clearTokens(config: TVConfig): TVConfig {
+  const next = { ...config };
+  delete next.refreshToken;
+  delete next.accessToken;
+  delete next.accessTokenExpiresAt;
+  delete next.token;
+  return next;
+}
+
 // Coerce an untrusted value (config file / IPC payload) to a valid theme, defaulting to dark —
 // the app's historical appearance.
 export function normalizeTheme(value: unknown): ThemePreference {

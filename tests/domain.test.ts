@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { pickInput, isOnInput, parseStatus, pickTV, isTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
-import { mergeConfig, defaultConfig, resolveStaticToken, normalizeTheme, type TVConfig } from "../src/domain/config.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, normalizeTheme, type TVConfig } from "../src/domain/config.js";
 import { hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
@@ -157,6 +157,35 @@ describe("config policy", () => {
     expect(normalizeTheme(undefined)).toBe("dark");
     expect(normalizeTheme("neon")).toBe("dark");
     expect(normalizeTheme(42)).toBe("dark");
+  });
+  it("clearTokens drops tokens but keeps the OAuth client and preferences", () => {
+    const signedIn: TVConfig = {
+      pcInput: "HDMI3",
+      clientId: "cid",
+      clientSecret: "secret",
+      redirectUri: "https://example.test/cb",
+      scopes: "r:devices:*",
+      token: "legacy-pat",
+      refreshToken: "rt",
+      accessToken: "at",
+      accessTokenExpiresAt: 123,
+      selectedDeviceIds: ["tv1"],
+      theme: "light",
+    };
+    expect(clearTokens(signedIn)).toEqual({
+      pcInput: "HDMI3",
+      clientId: "cid",
+      clientSecret: "secret",
+      redirectUri: "https://example.test/cb",
+      scopes: "r:devices:*",
+      selectedDeviceIds: ["tv1"],
+      theme: "light",
+    });
+  });
+  it("clearTokens does not mutate its input", () => {
+    const before: TVConfig = { pcInput: "HDMI2", clientId: "cid", refreshToken: "rt" };
+    clearTokens(before);
+    expect(before.refreshToken).toBe("rt");
   });
 });
 

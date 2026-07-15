@@ -86,7 +86,8 @@ export async function getSettings(): Promise<AppSettings> {
 
 // Persist the provided settings fields, leaving everything else (tokens) untouched. Empty/
 // whitespace string fields are ignored so the user can't blank out a saved value by accident —
-// matching the pcInput guard; the OAuth client is cleared via Sign out (resetConfig), not here.
+// matching the pcInput guard. Sign out clears the tokens but deliberately keeps the OAuth client,
+// so the client is only ever changed by saving new values here.
 export async function saveSettings(partial: Partial<AppSettings>): Promise<void> {
   const config = await loadConfig();
   if (typeof partial.clientId === "string" && partial.clientId.trim()) {

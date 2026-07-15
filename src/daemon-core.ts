@@ -38,10 +38,12 @@ const PLATFORM: Platform = isMac ? "mac" : "other";
 // string in config means the user cleared the binding — the command then has NO hotkey; it does
 // not fall back to these. Settings shows the same defaults (src/electron/settings.ts).
 const HOTKEY_DEFAULTS = defaultHotkeys(PLATFORM);
-// Human labels for the tray menu / startup log (the defaults; reflect the user's configured combo
-// where applicable via hotkeyLabel). Exported for the tray menu in src/electron/main.ts.
-export const ON_COMBO_LABEL = hotkeyLabel(HOTKEY_DEFAULTS.wake, PLATFORM);
-export const OFF_COMBO_LABEL = hotkeyLabel(HOTKEY_DEFAULTS.off, PLATFORM);
+// The tray menu labels its two action items with the live hotkey combo. Expose the platform and
+// the label renderer so main.ts can format the *current* accelerators (from getSettings) rather
+// than a compile-time constant — the earlier ON/OFF_COMBO_LABEL constants were fixed to the
+// defaults and never reflected a customized (or re-customized) combo.
+export const TRAY_PLATFORM = PLATFORM;
+export { hotkeyLabel };
 
 // No cooldown window: a new trigger may fire the instant the previous handler finishes. The gate
 // still rejects triggers *while* a handler is running, so key auto-repeat / a held combo can't

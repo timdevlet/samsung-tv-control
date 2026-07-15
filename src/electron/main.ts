@@ -10,7 +10,7 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startDaemon, ON_COMBO_LABEL, OFF_COMBO_LABEL, type Daemon } from "../daemon-core.js";
+import { startDaemon, hotkeyLabel, TRAY_PLATFORM, type Daemon } from "../daemon-core.js";
 import type { ActionResult } from "../domain/daemon.js";
 import { createApp } from "../app.js";
 import { onLog, log, logError, type LogEntry } from "../log.js";
@@ -155,19 +155,33 @@ function buildTray(): void {
   }
   tray = new Tray(trayImg);
   tray.setToolTip(mockMode ? "Samsung TV Control (Mock)" : "Samsung TV Control");
+  // Double-click (Windows) / click toggles the log window.
+  tray.on("double-click", () => showWindow());
+  tray.on("click", () => showWindow());
+}
+
+// (Re)build the tray context menu so its two action items show the CURRENT hotkey combos. Called
+// at startup and again after Settings saves, so a changed (or cleared) combo is reflected without
+// a restart. wakeHotkey/offHotkey are the resolved accelerators from getSettings ("" = cleared,
+// which hotkeyLabel renders as "unset"). No-op if the tray isn't built yet.
+function refreshTrayMenu(wakeHotkey: string, offHotkey: string): void {
+  if (!tray || tray.isDestroyed()) return;
   const menu = Menu.buildFromTemplate([
     { label: "Show logs", click: () => showWindow() },
     { label: "Settings…", click: () => openSettings() },
     { type: "separator" },
-    { label: `Wake TV + switch to PC  (${ON_COMBO_LABEL})`, click: () => void daemon?.triggerOn() },
-    { label: `TV off + sleep this PC  (${OFF_COMBO_LABEL})`, click: () => void daemon?.triggerOffAndSleep() },
+    {
+      label: `Wake TV + switch to PC  (${hotkeyLabel(wakeHotkey, TRAY_PLATFORM)})`,
+      click: () => void daemon?.triggerOn(),
+    },
+    {
+      label: `TV off + sleep this PC  (${hotkeyLabel(offHotkey, TRAY_PLATFORM)})`,
+      click: () => void daemon?.triggerOffAndSleep(),
+    },
     { type: "separator" },
     { label: "Quit", click: () => { quitting = true; app.quit(); } },
   ]);
   tray.setContextMenu(menu);
-  // Double-click (Windows) / click toggles the log window.
-  tray.on("double-click", () => showWindow());
-  tray.on("click", () => showWindow());
 }
 
 async function start(): Promise<void> {
@@ -183,6 +197,7 @@ async function start(): Promise<void> {
     if (win && !win.isDestroyed()) win.setBackgroundColor(windowBackground());
   });
   buildTray();
+  refreshTrayMenu(settings.wakeHotkey, settings.offHotkey);
   win = createWindow();
 
   // Subscribe BEFORE starting the daemon so its startup banner lands in the backlog.
@@ -252,8 +267,10 @@ async function start(): Promise<void> {
     minimizeToTrayOnClose = next.minimizeToTrayOnClose;
     // A changed theme takes effect immediately — native chrome and renderer CSS alike.
     applyTheme(next.theme);
-    // Apply changed hotkey combos to the running daemon without a restart.
+    // Apply changed hotkey combos to the running daemon without a restart, and relabel the tray
+    // menu's action items so they show the new combo too.
     daemon?.reloadHotkeys();
+    refreshTrayMenu(next.wakeHotkey, next.offHotkey);
     return { ok: true as const };
   });
 
