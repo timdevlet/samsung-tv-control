@@ -1,8 +1,10 @@
 import type { Ref } from "react";
 import { Field } from "../../components/Field";
+import { PasswordInput } from "../../components/PasswordInput";
 import { TextInput } from "../../components/TextInput";
 
-// The SmartThings OAuth client fields inside the collapsed "Advanced" group.
+// The SmartThings OAuth client fields, tucked behind the Account group's "Show additional
+// options" disclosure.
 export function OAuthClientFields({
   clientId,
   clientSecret,
@@ -21,7 +23,7 @@ export function OAuthClientFields({
     <>
       <p className="hint">
         Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use Sign in
-        (in the Account group above) to approve access — tokens are stored automatically.
+        above to approve access — tokens are stored automatically.
       </p>
       <Field label="Client ID" htmlFor="clientId">
         <TextInput
@@ -32,9 +34,8 @@ export function OAuthClientFields({
         />
       </Field>
       <Field label="Client Secret" htmlFor="clientSecret">
-        <TextInput
+        <PasswordInput
           id="clientSecret"
-          type="password"
           value={clientSecret}
           onValueChange={(v) => onChange("clientSecret", v)}
         />

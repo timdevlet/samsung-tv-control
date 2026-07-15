@@ -1,0 +1,32 @@
+/* Inline disclosure — a bare summary line (no card chrome) that expands secondary options
+   in place within a settings group. */
+.disclosure {
+  margin-top: 14px;
+
+  > summary {
+    cursor: pointer;
+    list-style: none;
+    font-size: 13px;
+    color: var(--muted);
+    user-select: none;
+
+    &::-webkit-details-marker { display: none; }
+
+    &::before {
+      content: "\25B8"; /* ▸ collapsed */
+      display: inline-block;
+      margin-right: 8px;
+      transition: transform 0.15s ease;
+    }
+
+    &:hover { color: var(--text); }
+  }
+
+  &[open] > summary::before { transform: rotate(90deg); }
+
+  .disclosure-body {
+    margin-top: 10px;
+
+    .field:last-child { margin-bottom: 0; }
+  }
+}

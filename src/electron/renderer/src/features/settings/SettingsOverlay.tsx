@@ -3,8 +3,8 @@ import { flushSync } from "react-dom";
 import type { AppSettings, AuthStatus } from "../../types";
 import { AppHeader } from "../../components/AppHeader";
 import { Button } from "../../components/Button";
-import { CollapsibleGroup } from "../../components/CollapsibleGroup";
 import { DangerZone } from "../../components/DangerZone";
+import { Disclosure } from "../../components/Disclosure";
 import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
 import { HintPills } from "../../components/HintPills";
@@ -30,8 +30,8 @@ const THEME_OPTIONS = [
 ] as const;
 
 // The whole Settings screen. Mounted only while open — every open gets fresh state: the draft
-// re-seeded from initialSettings, the device list reloaded, the OAuth group re-collapsed.
-// There is no Save button: every change autosaves (see useSettingsForm).
+// re-seeded from initialSettings, the device list reloaded, Account's additional options
+// re-collapsed. There is no Save button: every change autosaves (see useSettingsForm).
 export function SettingsOverlay({
   initialSettings,
   authorized,
@@ -124,8 +124,8 @@ export function SettingsOverlay({
     pcInputRef.current?.focus();
   }, []);
 
-  // OAuth-only: with no client configured, Sign in reveals the OAuth group instead of opening
-  // the browser popup.
+  // OAuth-only: with no client configured, Sign in expands the "Show additional options"
+  // disclosure (the OAuth client fields) instead of opening the browser popup.
   const onSignIn = async () => {
     // Freshly typed OAuth fields may still be inside the autosave debounce — persist them first
     // so authStatus/login see them.
@@ -167,14 +167,23 @@ export function SettingsOverlay({
         {/* The 640px column centering targets .modal-inner > * — OverlayScrollbars owns the
             direct children of .modal, so the groups need their own wrapper. */}
         <div className="modal-inner">
-          {!isAuthorized &&
+          {!isAuthorized && (
             <SettingsGroup title="Account">
-                <p className="hint">Sign in to SmartThings to control your TVs.</p>
-                <Button onClick={() => void onSignIn()} disabled={signingIn}>
-                  {signingIn ? "Waiting for approval…" : "Sign in"}
-                </Button>
-              </SettingsGroup>
-          }
+              <p className="hint">Sign in to SmartThings to control your TVs.</p>
+              <Button onClick={() => void onSignIn()} disabled={signingIn}>
+                {signingIn ? "Waiting for approval…" : "Sign in"}
+              </Button>
+              <Disclosure summary="Show additional options" open={oauthOpen} onToggle={setOauthOpen}>
+                <OAuthClientFields
+                  clientId={form.draft.clientId}
+                  clientSecret={form.draft.clientSecret}
+                  redirectUri={form.draft.redirectUri}
+                  onChange={form.set}
+                  clientIdRef={clientIdRef}
+                />
+              </Disclosure>
+            </SettingsGroup>
+          )}
           <SettingsGroup title="TV control">
             <div className="tv-tabs">
               <SegmentedControl
@@ -319,20 +328,6 @@ export function SettingsOverlay({
               onChange={(v) => form.set("minimizeToTrayOnClose", v)}
             />
           </SettingsGroup>
-          <CollapsibleGroup
-            summary="SmartThings OAuth client"
-            detail="Client ID, Secret & Redirect URI"
-            open={oauthOpen}
-            onToggle={setOauthOpen}
-          >
-            <OAuthClientFields
-              clientId={form.draft.clientId}
-              clientSecret={form.draft.clientSecret}
-              redirectUri={form.draft.redirectUri}
-              onChange={form.set}
-              clientIdRef={clientIdRef}
-            />
-          </CollapsibleGroup>
           <ErrorText>{form.error}</ErrorText>
           {isAuthorized && (
             <DangerZone description="Sign out to clear stored tokens from this device.">
