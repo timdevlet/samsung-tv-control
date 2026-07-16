@@ -69,6 +69,7 @@ export class SmartThings implements TVTransport {
       label: d.label || d.name || d.deviceId,
       name: d.name ?? "",
       capabilities: mainCapabilities(d),
+      source: "cloud" as const,
     }));
   }
 

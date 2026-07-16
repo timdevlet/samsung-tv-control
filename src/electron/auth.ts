@@ -8,7 +8,7 @@ import { BrowserWindow } from "electron";
 import { loadConfig, signOut } from "../config.js";
 import { hasOAuthClient } from "../domain/oauth.js";
 import { authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "../api/oauth.js";
-import { isMockMode } from "../dev/mock-cloud.js";
+import { isMockMode, isMockAuthorized, setMockAuthorized } from "../dev/mock-cloud.js";
 
 export interface AuthStatus {
   // An OAuth client (clientId + clientSecret) is configured. The client fields themselves now
@@ -18,14 +18,13 @@ export interface AuthStatus {
   authorized: boolean;
 }
 
-// Mock mode has no real tokens, so auth state is just this flag. It starts signed in (the fake
-// device list should load immediately), and Sign out / Sign in flip it — the auth UI flow stays
-// testable without real OAuth. The daemon's TV actions keep working regardless: mock mode's
-// token comes from the env, not from this state.
-let mockAuthorized = true;
+// Mock mode has no real tokens, so auth state is just a flag (isMockAuthorized/setMockAuthorized in
+// dev/mock-cloud.js — shared there so the pure FakeTransport can read it to hide cloud TVs when
+// signed out). It starts signed in (the fake cloud TVs load immediately), and Sign out / Sign in
+// flip it. The daemon's TV actions keep working regardless: mock mode's token comes from the env.
 
 export async function getAuthStatus(): Promise<AuthStatus> {
-  if (isMockMode()) return { hasClient: true, authorized: mockAuthorized };
+  if (isMockMode()) return { hasClient: true, authorized: isMockAuthorized() };
   const config = await loadConfig();
   return {
     hasClient: hasOAuthClient(config),
@@ -38,7 +37,7 @@ export async function getAuthStatus(): Promise<AuthStatus> {
 // keeping the mock config file preserves the seeded device selection.
 export async function logout(): Promise<void> {
   if (isMockMode()) {
-    mockAuthorized = false;
+    setMockAuthorized(false);
     return;
   }
   await signOut();
@@ -75,7 +74,7 @@ export async function login(parent: BrowserWindow | null): Promise<void | typeof
   // Mock mode: succeed instantly instead of opening the real SmartThings approval window (there
   // is no OAuth client configured, and the fake cloud has no auth server anyway).
   if (isMockMode()) {
-    mockAuthorized = true;
+    setMockAuthorized(true);
     return;
   }
   const config = await loadConfig();

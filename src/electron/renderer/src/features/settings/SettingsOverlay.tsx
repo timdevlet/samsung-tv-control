@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings } from "../../types";
+import { flushSync } from "react-dom";
+import type { AppSettings, AuthStatus } from "../../types";
 import { AppHeader } from "../../components/AppHeader";
 import { Button } from "../../components/Button";
+import { DangerZone } from "../../components/DangerZone";
+import { Disclosure } from "../../components/Disclosure";
 import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
 import { HintPills, type Hint } from "../../components/HintPills";
@@ -15,6 +18,7 @@ import { TextInput } from "../../components/TextInput";
 import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { DeviceList } from "./DeviceList";
+import { OAuthClientFields } from "./OAuthClientFields";
 import "./SettingsOverlay.scss";
 
 const PC_INPUT_HINTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"] as const;
@@ -42,10 +46,18 @@ function stripAddScratch<T>(configs: Record<string, T>): Record<string, T> {
 // re-collapsed. There is no Save button: every change autosaves (see useSettingsForm).
 export function SettingsOverlay({
   initialSettings,
+  authorized,
   onClose,
+  onAuthChanged,
 }: {
   initialSettings: AppSettings;
+  // Initial cloud auth state; fetched fresh by App right before mounting. Signing in from the
+  // Experimental group updates it live.
+  authorized: boolean;
   onClose: () => void;
+  // Re-fetch auth status after a sign-in/out or a client change; returns the latest so the caller
+  // can react (App keeps the pill it passes back down in step).
+  onAuthChanged: () => Promise<AuthStatus>;
 }) {
   const { state: devices, reload: reloadDevices } = useDeviceList();
   // Lets the persist closure read the *current* list state without retriggering an autosave
@@ -60,6 +72,11 @@ export function SettingsOverlay({
     // selection/config is only persisted while the rows are actually rendered — autosaving while
     // the list isn't loaded must not clear the stored selection.
     const res = await window.tvAPI.saveSettings({
+      // Cloud (Experimental) OAuth client — blank values are ignored by the main process so a saved
+      // client can't be blanked by accident (see src/electron/settings.ts).
+      clientId: draft.clientId.trim(),
+      clientSecret: draft.clientSecret.trim(),
+      redirectUri: draft.redirectUri.trim(),
       pcInput: draft.pcInput.trim(),
       minimizeToTrayOnClose: draft.minimizeToTrayOnClose,
       wakeHotkey: draft.wakeHotkey,
@@ -78,6 +95,8 @@ export function SettingsOverlay({
       theme: draft.theme,
     });
     if (!res.ok) return res.error || "Failed to save settings.";
+    // A changed clientId/clientSecret can flip hasClient — keep the auth state in step.
+    await onAuthChanged();
     return draft.pcInput.trim() ? null : "PC input can't be empty — keeping the last saved value.";
   });
 
@@ -92,6 +111,12 @@ export function SettingsOverlay({
     devices.kind === "ready"
       ? new Map(devices.devices.map((d) => [d.deviceId, d.label]))
       : new Map<string, string>();
+  // Cloud (SmartThings) TVs — the ones the live list tags source "cloud". They get a "Cloud" badge
+  // on their tab and skip the LAN pair/host fields (they aren't reached over the LAN).
+  const cloudIds =
+    devices.kind === "ready"
+      ? new Set(devices.devices.filter((d) => d.source === "cloud").map((d) => d.deviceId))
+      : new Set<string>();
   // Per-TV tabs come from the union of two sources: every TV the live list reports (cloud /
   // SmartThings devices, which carry no host in deviceConfigs) and every LAN-paired config
   // entry (keyed by `local:<mac>`, present even when the TV is temporarily unreachable). Using
@@ -110,9 +135,17 @@ export function SettingsOverlay({
   });
   const deviceTabs = tabIds.map((id) => {
     const cfg = form.draft.deviceConfigs[id];
+    const text = cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id;
     return {
       value: id,
-      label: cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id,
+      label: cloudIds.has(id) ? (
+        <span className="tab-label">
+          {text}
+          <span className="source-badge">C</span>
+        </span>
+      ) : (
+        text
+      ),
     };
   });
   // Per-TV tabs exist only once at least one TV has been paired; until then the bar is just
@@ -127,6 +160,8 @@ export function SettingsOverlay({
   const activeTvTab = tvTabOptions.some((o) => o.value === tvTab) ? tvTab : "all";
   const activeDeviceConfig =
     activeTvTab === "all" ? undefined : form.draft.deviceConfigs[activeTvTab];
+  // A cloud TV's per-TV tab hides the LAN pair/host/MAC fields — it isn't reached over the LAN.
+  const activeIsCloud = cloudIds.has(activeTvTab);
   // While a TV is enabled for All-TVs actions, the global combo already drives it — an empty
   // per-TV hotkey field shows it as a "(shared)" placeholder (same idea as PC input) instead of
   // reading as "no hotkey works here". Unselected TVs are NOT hit by the global pair, so they
@@ -145,6 +180,12 @@ export function SettingsOverlay({
   const [pairedTabs, setPairedTabs] = useState<Record<string, boolean>>({});
   const pcInputRef = useRef<HTMLInputElement>(null);
   const deviceInputRef = useRef<HTMLInputElement>(null);
+  // Cloud (Experimental) sign-in state. `oauthOpen` toggles the OAuth-client disclosure; Sign in
+  // expands it (and focuses the Client ID) when no client is configured yet, else opens the popup.
+  const [oauthOpen, setOauthOpen] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(authorized);
+  const [signingIn, setSigningIn] = useState(false);
+  const clientIdRef = useRef<HTMLInputElement>(null);
   // App version for the footer line (synced to the git tag via scripts/sync-version.mjs).
   const [appVersion, setAppVersion] = useState("");
 
@@ -235,6 +276,42 @@ export function SettingsOverlay({
   };
 
   const activePaired = pairedTabs[activeTvTab] ?? activeDeviceConfig?.paired ?? false;
+
+  // Cloud sign-in (Experimental). With no OAuth client configured, Sign in expands the client
+  // fields instead of opening the SmartThings popup; once a client exists it runs the OAuth flow
+  // and, on success, reloads the device list so the account's cloud TVs appear alongside local.
+  const onSignIn = async () => {
+    // Freshly typed client fields may still be inside the autosave debounce — persist first so
+    // authStatus/login see them.
+    await form.flush();
+    const status = await window.tvAPI.authStatus();
+    if (!status.hasClient) {
+      // The <details> must render open before its content is focusable.
+      flushSync(() => setOauthOpen(true));
+      clientIdRef.current?.focus();
+      return;
+    }
+    setSigningIn(true);
+    try {
+      const res = await window.tvAPI.login();
+      // Closing the OAuth popup (cancelled) is not a failure.
+      if (!res.ok && !res.cancelled && res.error) form.setError(res.error);
+      const next = await onAuthChanged();
+      setIsAuthorized(next.authorized);
+      if (next.authorized) reloadDevices();
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  // Sign out: clear stored tokens (the OAuth client is kept), refresh auth, and reload the list so
+  // the cloud TVs drop out — the local TVs stay.
+  const onSignOut = async () => {
+    await window.tvAPI.logout();
+    const next = await onAuthChanged();
+    setIsAuthorized(next.authorized);
+    reloadDevices();
+  };
 
   return (
     <Overlay labelledBy="settingsTitle">
@@ -403,7 +480,15 @@ export function SettingsOverlay({
                     onValidationError={form.setError}
                   />
                 </Field>
-                <>
+                {/* LAN pairing — hidden for cloud TVs, which are reached through SmartThings, not
+                    the local network. */}
+                {activeIsCloud ? (
+                  <p className="hint">
+                    This TV is controlled through your SmartThings account (Cloud). Manage it in the
+                    SmartThings app; sign out under Experimental to remove the cloud TVs.
+                  </p>
+                ) : (
+                  <>
                     <p className="hint">
                       Discover this TV on the network or enter its address, then Pair (turn the TV
                       on and accept the on-screen prompt).
@@ -436,6 +521,7 @@ export function SettingsOverlay({
                       </span>
                     </div>
                   </>
+                )}
               </>
             )}
           </SettingsGroup>
@@ -454,6 +540,34 @@ export function SettingsOverlay({
               checked={form.draft.minimizeToTrayOnClose}
               onChange={(v) => form.set("minimizeToTrayOnClose", v)}
             />
+          </SettingsGroup>
+          <SettingsGroup title="Experimental">
+            <p className="hint">
+              Cloud control via SmartThings — sign in to list and control the TVs on your Samsung
+              account alongside your local TVs. Cloud TVs are marked with a “Cloud” badge.
+            </p>
+            {isAuthorized ? (
+              <DangerZone description="Signed in to SmartThings. Sign out to clear the stored tokens and remove the cloud TVs (your local TVs stay).">
+                <Button variant="danger" onClick={() => void onSignOut()}>
+                  Sign out
+                </Button>
+              </DangerZone>
+            ) : (
+              <>
+                <Button onClick={() => void onSignIn()} disabled={signingIn}>
+                  {signingIn ? "Waiting for approval…" : "Sign in with SmartThings"}
+                </Button>
+                <Disclosure summary="OAuth client" open={oauthOpen} onToggle={setOauthOpen}>
+                  <OAuthClientFields
+                    clientId={form.draft.clientId}
+                    clientSecret={form.draft.clientSecret}
+                    redirectUri={form.draft.redirectUri}
+                    onChange={form.set}
+                    clientIdRef={clientIdRef}
+                  />
+                </Disclosure>
+              </>
+            )}
           </SettingsGroup>
           <ErrorText>{form.error}</ErrorText>
           {appVersion && <p className="app-version">Version {appVersion}</p>}

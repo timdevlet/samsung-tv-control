@@ -260,6 +260,7 @@ export class LocalTV implements TVTransport {
       label: cfg.alias || cfg.host || deviceId,
       name: cfg.host ?? "",
       capabilities: ["switch", LOCAL_INPUT_CAPABILITY],
+      source: "local" as const,
     }));
   }
 

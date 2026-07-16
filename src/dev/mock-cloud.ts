@@ -9,7 +9,13 @@ import { dirname, join } from "node:path";
 import { CONFIG_PATH } from "../config.js";
 import { INPUT_CAPABILITIES, mainCapabilities } from "../domain/tv.js";
 import type { RawDevice, RawStatus } from "../domain/tv.js";
-import { MOCK_DEVICES, statusBody } from "./fixtures.js";
+import {
+  MOCK_DEVICES,
+  MOCK_LOCAL_DEVICE_ID,
+  MOCK_LOCAL_HOST,
+  MOCK_LOCAL_MAC,
+  statusBody,
+} from "./fixtures.js";
 
 const API_BASE = "https://api.smartthings.com/v1";
 
@@ -18,6 +24,19 @@ export const MOCK_CONFIG_PATH = join(dirname(CONFIG_PATH), "smartthings-config.m
 
 export function isMockMode(): boolean {
   return process.env.SMARTTHINGS_MOCK?.trim() === "1";
+}
+
+// Mock cloud auth state. Real mode tracks this via the OAuth refresh token in the config; mock mode
+// has no real tokens, so this flag stands in — starts signed in (the fake cloud TVs load right
+// away) and Sign out / Sign in flip it. It lives here (not in electron/auth.ts, which imports
+// Electron) so the pure FakeTransport can read it to mirror RoutingTransport: cloud TVs disappear
+// when signed out, local TVs stay. auth.ts delegates its mock flag to these.
+let mockAuthorized = true;
+export function isMockAuthorized(): boolean {
+  return mockAuthorized;
+}
+export function setMockAuthorized(value: boolean): void {
+  mockAuthorized = value;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -100,7 +119,12 @@ export class FakeCloud {
     const path = url.slice(API_BASE.length).split("?")[0];
     const method = (init?.method ?? "GET").toUpperCase();
 
-    if (method === "GET" && path === "/devices") return json({ items: this.tvState.devices });
+    // The fake SmartThings cloud only knows CLOUD devices — a `local:` id is a LAN-only TV the
+    // account has never seen, so it's excluded from the account's device list (and its status /
+    // command routes 404, exactly as the real cloud would for an unknown id).
+    if (method === "GET" && path === "/devices") {
+      return json({ items: this.tvState.devices.filter((d) => !d.deviceId.startsWith("local:")) });
+    }
 
     const status = path.match(/^\/devices\/([^/]+)\/status$/);
     if (method === "GET" && status) return this.status(status[1]);
@@ -136,14 +160,27 @@ export class FakeCloud {
 //     code paths are never reached;
 //  2. the config file is redirected to MOCK_CONFIG_PATH so mock device selections (and a mock
 //     "Sign out" → resetConfig) can never touch the real smartthings-config.json, and seeded
-//     with both fake TVs preselected so the demo works out of the box;
+//     with the fake TVs preselected (plus the LAN TV's paired config) so the demo works out of the
+//     box;
 //  3. globalThis.fetch routes SmartThings API traffic into a FakeCloud, everything else through.
 export function installMockCloud(): void {
   process.env.SMARTTHINGS_TOKEN ||= "mock-token";
   process.env.SMARTTHINGS_CONFIG_PATH ||= MOCK_CONFIG_PATH;
   const configPath = process.env.SMARTTHINGS_CONFIG_PATH;
   if (!existsSync(configPath)) {
-    const seed = { pcInput: "HDMI2", selectedDeviceIds: MOCK_DEVICES.map((d) => d.deviceId) };
+    const seed = {
+      pcInput: "HDMI2",
+      selectedDeviceIds: MOCK_DEVICES.map((d) => d.deviceId),
+      // The LAN TV (MOCK_LOCAL_DEVICE_ID) shows as a paired local device: host/mac + a fake
+      // wsToken so its per-TV tab renders the LAN fields and a "Paired ✓" state.
+      deviceConfigs: {
+        [MOCK_LOCAL_DEVICE_ID]: {
+          host: MOCK_LOCAL_HOST,
+          mac: MOCK_LOCAL_MAC,
+          wsToken: "mock-ws-token",
+        },
+      },
+    };
     writeFileSync(configPath, JSON.stringify(seed, null, 2) + "\n", "utf8");
   }
 

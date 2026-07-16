@@ -16,6 +16,26 @@
       color: var(--text);
       cursor: pointer;
 
+      .device-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      /* "Cloud" pill marking a SmartThings-listed TV (LAN TVs get none). */
+      .source-badge {
+        flex: none;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        padding: 1px 7px;
+        line-height: 1.4;
+      }
+
       small {
         display: block;
         color: var(--muted);

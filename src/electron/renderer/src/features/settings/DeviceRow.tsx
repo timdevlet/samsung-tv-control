@@ -18,6 +18,9 @@ export function DeviceRow({
   onChange: (checked: boolean) => void;
 }) {
   const title = alias || device.label;
+  // Cloud TVs come from the SmartThings account (device.source === "cloud"); LAN-paired TVs get no
+  // badge. Marked so the two kinds are distinguishable in the selection list.
+  const isCloud = device.source === "cloud";
   // Subtitle: the user's description, the SmartThings label when an alias hides it (else the
   // model name when it differs), and the device id — the opaque UUID stays visible for
   // debugging/support.
@@ -32,7 +35,10 @@ export function DeviceRow({
   return (
     <div className="device-row">
       <label htmlFor={inputId}>
-        {title}
+        <span className="device-title">
+          {title}
+          {isCloud && <span className="source-badge">Cloud</span>}
+        </span>
         <small>{subtitle}</small>
       </label>
       <ToggleSwitch id={inputId} checked={checked} onChange={onChange} />

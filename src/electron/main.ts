@@ -249,14 +249,10 @@ async function start(): Promise<void> {
   // handler call reloads config + token), independent of the daemon. Returns a tagged result so
   // the renderer can show a friendly message when the user isn't signed in or the cloud call fails.
   ipcMain.handle("devices:list", async () => {
-    // Cloud mode: not signed in yet → return a clean "not authorized" result rather than letting
-    // listTVs() throw the CLI-oriented "run `npm run login`" message at the GUI. The renderer
-    // shows its own "Sign in to load your TVs." prompt for this case. Local mode has no account,
-    // so skip the auth gate — the TV list is config-driven there.
-    const local = (await getSettings()).transportMode === "local";
-    if (!local && !(await getAuthStatus()).authorized) {
-      return { ok: false as const, error: "", notAuthorized: true as const };
-    }
+    // Cloud and local run side by side now: listTVs() merges the LAN-paired TVs (config-driven,
+    // always available) with the account's cloud TVs (only when signed in — the routing transport
+    // degrades to local-only otherwise). No auth gate: a signed-out user simply sees their local
+    // TVs (possibly none), and the Experimental group's Sign in adds the cloud ones live.
     try {
       const devices = await createApp().listTVs();
       return { ok: true as const, devices };

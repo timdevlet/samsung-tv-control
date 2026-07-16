@@ -18,12 +18,27 @@ export default function App() {
   const toasts = useToasts();
   const [view, setView] = useState<"power" | "logs">("power");
   const [autoScroll, setAutoScroll] = useState(true);
-  // The Settings overlay; null when closed. Settings are fetched before mounting so the fields are
-  // filled at first paint (a fresh mount per open resets the device reload).
+  // The Settings overlay; null when closed. Settings + cloud auth status are fetched before
+  // mounting so the fields (and the Experimental group's signed-in/out state) are filled at first
+  // paint (a fresh mount per open resets the device reload).
   const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [authorized, setAuthorized] = useState(false);
 
   const openSettings = useCallback(async () => {
-    setSettings(await window.tvAPI.getSettings());
+    const [next, status] = await Promise.all([
+      window.tvAPI.getSettings(),
+      window.tvAPI.authStatus(),
+    ]);
+    setAuthorized(status.authorized);
+    setSettings(next);
+  }, []);
+
+  // Re-fetch cloud auth after a sign-in/out or client change; keeps App's copy in step with what
+  // the overlay reports and returns the latest to the caller.
+  const onAuthChanged = useCallback(async () => {
+    const status = await window.tvAPI.authStatus();
+    setAuthorized(status.authorized);
+    return status;
   }, []);
 
   useOpenSettingsEvent(openSettings);
@@ -52,7 +67,12 @@ export default function App() {
       </AppHeader>
 
       {settings && (
-        <SettingsOverlay initialSettings={settings} onClose={() => setSettings(null)} />
+        <SettingsOverlay
+          initialSettings={settings}
+          authorized={authorized}
+          onClose={() => setSettings(null)}
+          onAuthChanged={onAuthChanged}
+        />
       )}
 
       {view === "power" ? (

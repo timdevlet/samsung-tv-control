@@ -1,7 +1,8 @@
 // The transport seam: the set of TV operations the app (src/app.ts) needs, independent of HOW
 // the TV is reached. Two implementations conform to it — SmartThings (cloud REST, src/api/
 // smartthings.ts) and LocalTV (LAN: Wake-on-LAN + the Samsung remote WebSocket, src/api/
-// local-tv.ts) — and app.ts's buildTransport() picks one per invocation from config.transportMode.
+// local-tv.ts). app.ts's RoutingTransport runs both side by side, dispatching per deviceId (a
+// `local:<mac>` id → LAN, a SmartThings UUID → cloud) and merging their device lists.
 // This file is an I/O contract, so it lives under api/ (not the pure domain/tv.ts) and only
 // imports the pure domain types.
 

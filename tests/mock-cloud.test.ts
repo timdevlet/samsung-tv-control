@@ -22,7 +22,8 @@ vi.mock("../src/config.js", () => ({
 vi.mock("electron", () => ({ BrowserWindow: class {} }));
 
 import { FakeCloud, installMockCloud } from "../src/dev/mock-cloud.js";
-import { MOCK_DEVICES } from "../src/dev/fixtures.js";
+import { makeMockTransport } from "../src/dev/mock-transport.js";
+import { MOCK_DEVICES, MOCK_LOCAL_DEVICE_ID } from "../src/dev/fixtures.js";
 import { parseStatus, type RawStatus } from "../src/domain/tv.js";
 import { createApp } from "../src/app.js";
 import { getAuthStatus, login, logout } from "../src/electron/auth.js";
@@ -109,6 +110,12 @@ describe("mock-mode auth", () => {
     delete process.env.SMARTTHINGS_MOCK;
   });
 
+  // The auth flag is module-level (dev/mock-cloud.ts) and persists across tests in the process, so
+  // always leave it signed back in.
+  afterEach(async () => {
+    await login(null);
+  });
+
   it("starts signed in; Sign out and Sign in flip the fake state without real OAuth", async () => {
     expect(await getAuthStatus()).toEqual({ hasClient: true, authorized: true });
 
@@ -118,6 +125,22 @@ describe("mock-mode auth", () => {
     // login(null) must not reach the OAuth window path (the stub BrowserWindow would throw on use).
     await expect(login(null)).resolves.toBeUndefined();
     expect((await getAuthStatus()).authorized).toBe(true);
+  });
+
+  it("hides cloud TVs when signed out; the LAN TV stays listed", async () => {
+    // Signed in: both cloud TVs + the LAN TV list (mirrors RoutingTransport merging both sources).
+    const signedIn = await makeMockTransport().listTVs();
+    expect(signedIn.map((t) => t.deviceId)).toEqual([
+      "mock-tv-1",
+      "mock-tv-2",
+      MOCK_LOCAL_DEVICE_ID,
+    ]);
+
+    await logout();
+    // Signed out: only the local TV remains — cloud TVs need a signed-in account.
+    const signedOut = await makeMockTransport().listTVs();
+    expect(signedOut.map((t) => t.deviceId)).toEqual([MOCK_LOCAL_DEVICE_ID]);
+    expect(signedOut.every((t) => t.source === "local")).toBe(true);
   });
 });
 
@@ -154,9 +177,20 @@ describe("installMockCloud + createApp integration", () => {
     const seed = JSON.parse(readFileSync(configPath, "utf8")) as {
       pcInput: string;
       selectedDeviceIds: string[];
+      deviceConfigs: Record<string, { host?: string; wsToken?: string }>;
     };
     expect(seed.pcInput).toBe("HDMI2");
-    expect(seed.selectedDeviceIds).toEqual(["mock-tv-1", "mock-tv-2"]);
+    // Two cloud TVs + the LAN TV are all preselected out of the box.
+    expect(seed.selectedDeviceIds).toEqual([
+      "mock-tv-1",
+      "mock-tv-2",
+      "local:aa:bb:cc:dd:ee:ff",
+    ]);
+    // The LAN TV is seeded as a paired local device (host + wsToken) so its per-TV tab works.
+    expect(seed.deviceConfigs["local:aa:bb:cc:dd:ee:ff"]).toMatchObject({
+      host: "10.0.0.42",
+      wsToken: "mock-ws-token",
+    });
   });
 
   it("drives the real wake + input-switch flow, with state persisting between actions", async () => {

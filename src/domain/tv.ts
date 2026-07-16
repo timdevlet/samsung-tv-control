@@ -6,6 +6,10 @@ export interface STDevice {
   label: string;
   name: string;
   capabilities: string[];
+  // Which transport surfaced this device: "cloud" (SmartThings account) or "local" (a LAN-paired
+  // config entry). Optional so pure parsing helpers needn't set it; the transports tag it on their
+  // list results so the UI can badge cloud TVs. Undefined = unknown/untagged.
+  source?: "cloud" | "local";
 }
 
 export interface InputSource {

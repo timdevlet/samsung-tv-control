@@ -7,7 +7,7 @@
 
 import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
-import { pickInput, isOnInput } from "./domain/tv.js";
+import { pickInput, isOnInput, isTV, pickTV } from "./domain/tv.js";
 import { SmartThings } from "./api/smartthings.js";
 import { LocalTV } from "./api/local-tv.js";
 import type { TVTransport } from "./api/transport.js";
@@ -22,6 +22,79 @@ const POWER_ON_ATTEMPTS = 5;
 const POWER_ON_RETRY_MS = 3000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// True for a LAN-paired TV's synthetic deviceId (see localDeviceId() in api/local-tv.ts). Anything
+// else is a cloud (SmartThings) UUID — the two id namespaces are what lets one transport route
+// per-device without a global mode flag.
+function isLocalDeviceId(deviceId: string): boolean {
+  return deviceId.startsWith("local:");
+}
+
+// Runs the cloud and local transports side by side. Per-device operations are dispatched by
+// deviceId (local ids → LocalTV, cloud UUIDs → SmartThings); the cloud client is built lazily and
+// only when needed, so a local-only, signed-out user never triggers token resolution (which throws
+// when no credentials exist). listDevices/listTVs/findTV merge both sources, degrading to
+// local-only if the cloud is unreachable/unauthorized rather than emptying the whole list.
+class RoutingTransport implements TVTransport {
+  private readonly local: LocalTV;
+  private cloudClient?: SmartThings;
+
+  constructor(
+    private readonly config: TVConfig,
+    private readonly resolveToken: (config: TVConfig) => Promise<string>,
+  ) {
+    this.local = new LocalTV(config);
+  }
+
+  // Lazily resolve a cloud client. Cached per invocation so a multi-TV command resolves the token
+  // once. Throws (via resolveToken) when no credentials are configured — callers that can degrade
+  // (the list methods) catch it; per-device cloud operations let it surface.
+  private async cloud(): Promise<SmartThings> {
+    if (!this.cloudClient) this.cloudClient = new SmartThings(await this.resolveToken(this.config));
+    return this.cloudClient;
+  }
+
+  private async transportFor(deviceId: string): Promise<TVTransport> {
+    return isLocalDeviceId(deviceId) ? this.local : this.cloud();
+  }
+
+  async getStatus(deviceId: string): Promise<TVStatus> {
+    return (await this.transportFor(deviceId)).getStatus(deviceId);
+  }
+
+  async powerOn(deviceId: string): Promise<void> {
+    await (await this.transportFor(deviceId)).powerOn(deviceId);
+  }
+
+  async powerOff(deviceId: string): Promise<void> {
+    await (await this.transportFor(deviceId)).powerOff(deviceId);
+  }
+
+  async setInputSource(deviceId: string, capability: string, source: string): Promise<void> {
+    await (await this.transportFor(deviceId)).setInputSource(deviceId, capability, source);
+  }
+
+  async listDevices(): Promise<STDevice[]> {
+    // Local is config-driven and always available; cloud is best-effort — a missing client (signed
+    // out) or a cloud error must not hide the local TVs, so log and fall back to local-only.
+    const local = await this.local.listDevices();
+    let cloud: STDevice[] = [];
+    try {
+      cloud = await (await this.cloud()).listDevices();
+    } catch (err) {
+      log(`Cloud device list unavailable (${err instanceof Error ? err.message : String(err)}) — showing local TVs only.`);
+    }
+    return [...local, ...cloud];
+  }
+
+  async listTVs(): Promise<STDevice[]> {
+    return (await this.listDevices()).filter(isTV);
+  }
+
+  async findTV(): Promise<STDevice | null> {
+    return pickTV(await this.listDevices());
+  }
+}
 
 export interface App {
   login(): Promise<void>;
@@ -66,16 +139,14 @@ export function createApp(): App {
     return config.selectedDeviceIds ?? [];
   }
 
-  // Build the transport for this invocation. Selection precedence:
-  //   1. Mock mode — an in-process fake, so `npm run electron:dev:mock` and tests never touch the
-  //      real cloud or LAN (regardless of transportMode).
-  //   2. transportMode "local" — direct LAN control (no OAuth token needed, so the cloud
-  //      token-resolution below is skipped entirely).
-  //   3. default "cloud" — the SmartThings REST client, which needs a resolved access token.
+  // Build the transport for this invocation. Cloud and local run side by side: a single
+  // RoutingTransport dispatches each operation to the right underlying transport by deviceId
+  // (`local:<mac>` → LAN, a SmartThings UUID → cloud), and merges both device lists. Mock mode
+  // still short-circuits to one in-process fake so `npm run electron:dev:mock` and tests never
+  // touch the real cloud or LAN.
   async function buildTransport(config: TVConfig): Promise<TVTransport> {
     if (isMockMode()) return makeMockTransport();
-    if (config.transportMode === "local") return new LocalTV(config);
-    return new SmartThings(await resolveAccessToken(config));
+    return new RoutingTransport(config, resolveAccessToken);
   }
 
   // DI core: load config, build the transport (which resolves a token only in cloud mode).

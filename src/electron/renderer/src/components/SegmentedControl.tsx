@@ -1,5 +1,7 @@
+import type { ReactNode } from "react";
 import "./SegmentedControl.scss";
-// A row of joined buttons where exactly one option is selected — used for the theme picker.
+// A row of joined buttons where exactly one option is selected — used for the theme picker and the
+// per-TV Settings tabs. Labels are ReactNode so a tab can render a "Cloud" badge alongside its name.
 export function SegmentedControl<T extends string>({
   value,
   options,
@@ -7,7 +9,7 @@ export function SegmentedControl<T extends string>({
   ariaLabel,
 }: {
   value: T;
-  options: readonly { value: T; label: string }[];
+  options: readonly { value: T; label: ReactNode }[];
   onChange: (value: T) => void;
   ariaLabel?: string;
 }) {

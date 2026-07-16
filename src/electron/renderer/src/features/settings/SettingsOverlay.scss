@@ -34,6 +34,26 @@
 
     button { flex: 0 0 auto; }
   }
+
+  /* A per-TV tab label carrying a "Cloud" badge for SmartThings-listed TVs. */
+  .tab-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* "Cloud" pill inside a tab. Uses currentColor so it reads correctly on both the plain and the
+     active (accent-filled) segment without a second rule. */
+  .source-badge {
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    padding: 0 5px;
+    opacity: 0.85;
+  }
 }
 
 /* Subtle build-version line at the very bottom of the settings body. */

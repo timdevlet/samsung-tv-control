@@ -159,10 +159,10 @@ export function normalizeTheme(value: unknown): ThemePreference {
     : "dark";
 }
 
-// Coerce an untrusted value to a valid transport mode. The app is now LAN-only (the Cloud/Local
-// toggle was removed), so anything unset/malformed resolves to "local". The "cloud" value is
-// still accepted if explicitly present in an old config, and the SmartThings code stays in the
-// tree, but nothing in the UI selects it anymore.
+// Coerce an untrusted value to a valid transport mode, defaulting to "local" when unset/malformed.
+// NOTE: transportMode no longer *selects* a transport — cloud and local run side by side and
+// app.ts's RoutingTransport dispatches per deviceId. The field is kept for back-compat (old
+// configs may carry it) and still round-trips through Settings, but nothing branches on it.
 export function normalizeTransportMode(value: unknown): TransportMode {
   return TRANSPORT_MODES.includes(value as TransportMode) ? (value as TransportMode) : "local";
 }
