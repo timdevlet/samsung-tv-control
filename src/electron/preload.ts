@@ -34,6 +34,8 @@ const tvAPI = {
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
   login: (): Promise<AuthResult> => ipcRenderer.invoke("auth:login"),
   logout: (): Promise<AuthResult> => ipcRenderer.invoke("auth:logout"),
+  // The app version (from package.json, kept in sync with the git tag by scripts/sync-version.mjs).
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke("app:version"),
   // Settings
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke("settings:get"),
   saveSettings: (partial: Partial<AppSettings>): Promise<AuthResult> =>

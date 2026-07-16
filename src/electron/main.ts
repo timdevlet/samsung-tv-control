@@ -311,6 +311,7 @@ async function start(): Promise<void> {
     }
   });
 
+  ipcMain.handle("app:version", () => app.getVersion());
   ipcMain.handle("settings:get", () => getSettings());
   ipcMain.handle("settings:save", async (_e, partial: Partial<AppSettings>) => {
     await saveSettings(partial);

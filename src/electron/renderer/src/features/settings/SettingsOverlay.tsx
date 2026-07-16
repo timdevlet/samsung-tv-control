@@ -4,7 +4,7 @@ import { AppHeader } from "../../components/AppHeader";
 import { Button } from "../../components/Button";
 import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
-import { HintPills } from "../../components/HintPills";
+import { HintPills, type Hint } from "../../components/HintPills";
 import { HotkeyField } from "../../components/HotkeyField";
 import { Overlay } from "../../components/Overlay";
 import { ScrollArea } from "../../components/ScrollArea";
@@ -18,6 +18,9 @@ import { DeviceList } from "./DeviceList";
 import "./SettingsOverlay.scss";
 
 const PC_INPUT_HINTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"] as const;
+// The per-TV field additionally offers "Shared", which clears the override (empty string) so the
+// TV falls back to the global PC input.
+const TV_PC_INPUT_HINTS: readonly Hint[] = [{ label: "Shared", value: "" }, ...PC_INPUT_HINTS];
 
 const THEME_OPTIONS = [
   { value: "light", label: "Light" },
@@ -82,19 +85,42 @@ export function SettingsOverlay({
   // the selected TVs), a deviceId = that TV's own settings. Not persisted — every open starts on
   // "All TVs". Tab labels track the alias draft live, so renaming a TV renames its tab.
   const [tvTab, setTvTab] = useState("all");
-  // Per-TV tabs exist only once the list is in; until then (loading / signed out / no TVs)
-  // the bar is just "All TVs".
-  const hasDeviceTabs = devices.kind === "ready" && devices.devices.length > 0;
-  // The app is LAN-only: there's always an "Add a TV" tab so a first TV can be paired before any
-  // device exists (a paired TV then gets its own tab).
+  // Tab labels track the alias draft live, so renaming a TV renames its tab; the live list
+  // supplies the fallback label. The "__add__" scratch entry (the Add-a-TV tab) is not a real
+  // device and never gets a tab here.
+  const listedLabels =
+    devices.kind === "ready"
+      ? new Map(devices.devices.map((d) => [d.deviceId, d.label]))
+      : new Map<string, string>();
+  // Per-TV tabs come from the union of two sources: every TV the live list reports (cloud /
+  // SmartThings devices, which carry no host in deviceConfigs) and every LAN-paired config
+  // entry (keyed by `local:<mac>`, present even when the TV is temporarily unreachable). Using
+  // only the host-bearing configs would drop cloud-listed TVs — they'd show in "TVs to control"
+  // yet have no tab. Deduped by id, live-list order first.
+  const tabIds: string[] = [];
+  const seenTabIds = new Set<string>();
+  const addTabId = (id: string) => {
+    if (id === ADD_TAB || seenTabIds.has(id)) return;
+    seenTabIds.add(id);
+    tabIds.push(id);
+  };
+  if (devices.kind === "ready") devices.devices.forEach((d) => addTabId(d.deviceId));
+  Object.entries(form.draft.deviceConfigs).forEach(([id, cfg]) => {
+    if (cfg.host?.trim()) addTabId(id);
+  });
+  const deviceTabs = tabIds.map((id) => {
+    const cfg = form.draft.deviceConfigs[id];
+    return {
+      value: id,
+      label: cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id,
+    };
+  });
+  // Per-TV tabs exist only once at least one TV has been paired; until then the bar is just
+  // "All TVs" plus the always-present "Add a TV" tab so a first TV can be paired.
+  const hasDeviceTabs = deviceTabs.length > 0;
   const tvTabOptions = [
     { value: "all", label: "All TVs" },
-    ...(hasDeviceTabs
-      ? devices.devices.map((d) => ({
-          value: d.deviceId,
-          label: form.draft.deviceConfigs[d.deviceId]?.alias || d.label,
-        }))
-      : []),
+    ...deviceTabs,
     { value: ADD_TAB, label: "+ Add a TV" },
   ];
   // A device can disappear between list loads — never leave the UI stranded on a gone tab.
@@ -119,9 +145,12 @@ export function SettingsOverlay({
   const [pairedTabs, setPairedTabs] = useState<Record<string, boolean>>({});
   const pcInputRef = useRef<HTMLInputElement>(null);
   const deviceInputRef = useRef<HTMLInputElement>(null);
+  // App version for the footer line (synced to the git tag via scripts/sync-version.mjs).
+  const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
     pcInputRef.current?.focus();
+    void window.tvAPI.getAppVersion().then(setAppVersion);
   }, []);
 
   // Discover TVs on the LAN and auto-fill the active tab's host/mac from the
@@ -349,7 +378,7 @@ export function SettingsOverlay({
                     onValueChange={(v) => form.setDeviceConfig(activeTvTab, "pcInput", v)}
                   />
                   <HintPills
-                    hints={PC_INPUT_HINTS}
+                    hints={TV_PC_INPUT_HINTS}
                     onPick={(v) => {
                       form.setDeviceConfig(activeTvTab, "pcInput", v);
                       deviceInputRef.current?.focus();
@@ -395,19 +424,6 @@ export function SettingsOverlay({
                         onValueChange={(v) => form.setDeviceConfig(activeTvTab, "mac", v)}
                       />
                     </Field>
-                    <Field label="Input key sequence (optional)" htmlFor="tvInputKeys">
-                      <TextInput
-                        id="tvInputKeys"
-                        placeholder="e.g. KEY_HDMI,KEY_HDMI"
-                        value={activeDeviceConfig?.inputKeySeq ?? ""}
-                        onValueChange={(v) => form.setDeviceConfig(activeTvTab, "inputKeySeq", v)}
-                      />
-                    </Field>
-                    <p className="hint">
-                      Input switching over the network is best-effort: there's no direct “set
-                      HDMI2” command, so it sends the source key — record a key sequence above to
-                      land on the right input.
-                    </p>
                     <div className="pair-row">
                       <Button onClick={() => void onDiscover()} disabled={discovering}>
                         {discovering ? "Searching…" : "Discover"}
@@ -424,7 +440,7 @@ export function SettingsOverlay({
             )}
           </SettingsGroup>
           <SettingsGroup title="Behavior">
-            <Field label="Theme">
+            <Field label="Theme" className="inline">
               <SegmentedControl
                 ariaLabel="Theme"
                 value={form.draft.theme}
@@ -440,6 +456,7 @@ export function SettingsOverlay({
             />
           </SettingsGroup>
           <ErrorText>{form.error}</ErrorText>
+          {appVersion && <p className="app-version">Version {appVersion}</p>}
         </div>
       </ScrollArea>
     </Overlay>

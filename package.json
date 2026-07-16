@@ -1,6 +1,6 @@
 {
   "name": "samsung-tv-control",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Wake a Samsung TV and switch its input to PC via the SmartThings cloud API.",
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -22,9 +22,10 @@
     "electron:build": "node scripts/build-electron.mjs",
     "electron:dev": "node scripts/electron-dev.mjs",
     "electron:dev:mock": "node scripts/electron-dev.mjs --mock",
-    "dist": "npm run electron:build && electron-builder",
-    "dist:win": "npm run electron:build && electron-builder --win",
-    "dist:dir": "npm run electron:build && electron-builder --dir"
+    "sync-version": "node scripts/sync-version.mjs",
+    "dist": "npm run sync-version && npm run electron:build && electron-builder",
+    "dist:win": "npm run sync-version && npm run electron:build && electron-builder --win",
+    "dist:dir": "npm run sync-version && npm run electron:build && electron-builder --dir"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

@@ -9,6 +9,22 @@
     color: var(--muted);
   }
 
+  /* Inline variant — label left, control pushed to the right on one line:
+     | Theme ............... | (light)(dark)(system) |. Matches the toggle rows. */
+  &.inline {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 14px 0;
+
+    label {
+      margin: 0;
+      flex: 1;
+      font-size: inherit;
+      color: var(--text);
+    }
+  }
+
   input {
     width: 100%;
     font: inherit;

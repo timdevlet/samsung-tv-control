@@ -1,14 +1,21 @@
-/* Toggle row inside a modal field — label left, macOS-style switch right
+/* Toggle row inside a modal field — label left, switch pushed to the right
    (the switch itself lives in ToggleSwitch.scss). */
 .field.check {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
+  margin: 14px 0;
 
   label {
     margin: 0;
     flex: 1;
     color: var(--text);
     cursor: pointer;
+  }
+
+  /* The switch renders first in the DOM; reorder it after the label so the
+     row reads: | label ........... | switch |. flex:1 on the label does the pushing. */
+  .switch {
+    order: 1;
   }
 }

@@ -8,8 +8,7 @@
   border: none;
   border-radius: 0;
   padding: 16px 20px 16px 0px;
-  margin-bottom: 30px;
-
+ 
   p.hint {
     margin: 0 0 16px;
     color: var(--muted);
@@ -35,6 +34,13 @@
 
     button { flex: 0 0 auto; }
   }
+}
+
+/* Subtle build-version line at the very bottom of the settings body. */
+p.app-version { 
+  text-align: right;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* Local-transport pairing controls: the Discover/Pair buttons and the paired-state label on one
