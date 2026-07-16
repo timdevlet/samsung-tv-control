@@ -3,5 +3,5 @@
 export type { LogEntry } from "../../../log.js";
 export type { AuthStatus } from "../../auth.js";
 export type { AppSettings, DeviceConfigSettings } from "../../settings.js";
-export type { ThemePreference } from "../../../domain/config.js";
+export type { ThemePreference, TransportMode } from "../../../domain/config.js";
 export type { STDevice } from "../../../domain/tv.js";

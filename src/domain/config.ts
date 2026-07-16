@@ -5,6 +5,13 @@ export type ThemePreference = "light" | "dark" | "system";
 
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["light", "dark", "system"];
 
+// How the app reaches the TV. "cloud" = the SmartThings REST API (OAuth, needs internet — the
+// historical default). "local" = direct LAN control (Wake-on-LAN + the Samsung remote WebSocket,
+// no Samsung account, works offline). Unset means "cloud" so existing configs are unchanged.
+export type TransportMode = "cloud" | "local";
+
+export const TRANSPORT_MODES: readonly TransportMode[] = ["cloud", "local"];
+
 // A TV's own settings, all optional — an unset field falls back to the app-wide behavior.
 export interface DeviceConfig {
   // Custom display name shown instead of the SmartThings label (e.g. "65 TV").
@@ -17,10 +24,37 @@ export interface DeviceConfig {
   // independent of selectedDeviceIds. Empty/unset = no action of that kind.
   wakeHotkey?: string;
   offHotkey?: string;
+
+  // Local (LAN) transport fields — used only when transportMode is "local".
+  // The TV's LAN IP or hostname (the WebSocket + info-endpoint target).
+  host?: string;
+  // The TV's MAC address, for the Wake-on-LAN magic packet. Canonicalized (lowercase, colon-
+  // separated) on save so packet construction is deterministic.
+  mac?: string;
+  // Optional comma-separated remote-key sequence to reach the PC input over LAN (e.g.
+  // "KEY_HDMI,KEY_HDMI"). There's no authoritative "set HDMI2" over the local remote protocol,
+  // so an advanced user can record the keypresses that land on their PC input. Unset = send a
+  // single source/HDMI key.
+  inputKeySeq?: string;
+  // The local WebSocket pairing token returned by the TV's on-screen "Allow" the first time we
+  // connect. A SECRET — persisted here but never surfaced to the renderer (getSettings exposes
+  // only a `paired` boolean) and only written by the pairing IPC, not through saveSettings.
+  wsToken?: string;
 }
 
-// The DeviceConfig string fields, used to normalize untrusted maps field-by-field.
-const DEVICE_CONFIG_FIELDS = ["alias", "description", "pcInput", "wakeHotkey", "offHotkey"] as const;
+// The DeviceConfig plain-string fields normalized field-by-field from untrusted maps. wsToken is
+// handled separately (see normalizeDeviceConfigs) so it's preserved but never treated as a
+// user-editable text field.
+const DEVICE_CONFIG_FIELDS = [
+  "alias",
+  "description",
+  "pcInput",
+  "wakeHotkey",
+  "offHotkey",
+  "host",
+  "mac",
+  "inputKeySeq",
+] as const;
 
 // Persisted as smartthings-config.json (plain JSON, rewritten in full by saveConfig — any
 // comment added there is stripped on the next save). Document fields here. This is the shared
@@ -77,6 +111,9 @@ export interface TVConfig {
   // App color theme. "system" follows the OS light/dark setting. Unset means dark —
   // the app's historical appearance.
   theme?: ThemePreference;
+
+  // How commands reach the TV. Unset = "cloud" (the historical SmartThings behavior).
+  transportMode?: TransportMode;
 }
 
 const DEFAULTS: TVConfig = {
@@ -122,6 +159,23 @@ export function normalizeTheme(value: unknown): ThemePreference {
     : "dark";
 }
 
+// Coerce an untrusted value to a valid transport mode. The app is now LAN-only (the Cloud/Local
+// toggle was removed), so anything unset/malformed resolves to "local". The "cloud" value is
+// still accepted if explicitly present in an old config, and the SmartThings code stays in the
+// tree, but nothing in the UI selects it anymore.
+export function normalizeTransportMode(value: unknown): TransportMode {
+  return TRANSPORT_MODES.includes(value as TransportMode) ? (value as TransportMode) : "local";
+}
+
+// Canonicalize a MAC address to lowercase colon-separated form ("AA-BB-…" / "aabb…" → "aa:bb:…")
+// so the Wake-on-LAN packet is built deterministically. Returns "" for anything that isn't 12
+// hex digits once separators are stripped — the caller treats that as "no MAC".
+export function canonicalizeMac(value: string): string {
+  const hex = value.replace(/[^0-9a-fA-F]/g, "").toLowerCase();
+  if (hex.length !== 12) return "";
+  return hex.match(/.{2}/g)!.join(":");
+}
+
 // Coerce an untrusted value (config file / IPC payload) to a clean per-device config map:
 // only non-empty string fields are kept (trimmed), and entries left with no field at all are
 // pruned entirely — so clearing every field of a TV removes it from the persisted map.
@@ -135,6 +189,16 @@ export function normalizeDeviceConfigs(value: unknown): Record<string, DeviceCon
       const v = (raw as Record<string, unknown>)[field];
       if (typeof v === "string" && v.trim()) entry[field] = v.trim();
     }
+    // Canonicalize a captured MAC so WoL is deterministic; drop it if it isn't a valid MAC.
+    if (entry.mac) {
+      const mac = canonicalizeMac(entry.mac);
+      if (mac) entry.mac = mac;
+      else delete entry.mac;
+    }
+    // wsToken is a secret set by the pairing IPC, not a user text field — preserve it as-is
+    // (it also keeps a paired-but-otherwise-empty TV from being pruned below).
+    const token = (raw as Record<string, unknown>).wsToken;
+    if (typeof token === "string" && token.trim()) entry.wsToken = token.trim();
     if (Object.keys(entry).length > 0) result[deviceId] = entry;
   }
   return result;

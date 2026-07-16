@@ -57,6 +57,10 @@ describe("deviceConfigs in getSettings", () => {
         pcInput: "",
         wakeHotkey: "Command+Control+1",
         offHotkey: "",
+        host: "",
+        mac: "",
+        inputKeySeq: "",
+        paired: false,
       },
     });
   });
@@ -124,5 +128,62 @@ describe("deviceConfigs in saveSettings", () => {
     });
     expect(store.wakeHotkey).toBe("Command+Control+E");
     expect(store.selectedDeviceIds).toEqual(["tv1"]);
+  });
+});
+
+describe("transport mode", () => {
+  it("defaults to local when unset (the app is LAN-only)", async () => {
+    expect((await getSettings()).transportMode).toBe("local");
+  });
+
+  it("still round-trips an explicit mode (cloud value stays honored if present in an old config)", async () => {
+    await saveSettings({ transportMode: "cloud" });
+    expect(store.transportMode).toBe("cloud");
+    expect((await getSettings()).transportMode).toBe("cloud");
+  });
+
+  it("ignores a malformed transport mode", async () => {
+    store.transportMode = "local";
+    await saveSettings({ transportMode: "bogus" as never });
+    expect(store.transportMode).toBe("local");
+  });
+});
+
+describe("LAN device fields", () => {
+  it("canonicalizes the MAC and exposes host/mac/inputKeySeq, never wsToken", async () => {
+    store.deviceConfigs = {
+      "local:tv": { host: "1.2.3.4", mac: "A0-B1-C2-D3-E4-F5", inputKeySeq: "KEY_HDMI", wsToken: "secret" },
+    };
+    const settings = await getSettings();
+    expect(settings.deviceConfigs["local:tv"]).toMatchObject({
+      host: "1.2.3.4",
+      mac: "a0:b1:c2:d3:e4:f5",
+      inputKeySeq: "KEY_HDMI",
+      paired: true,
+    });
+    // The token itself must never reach the renderer.
+    expect(settings.deviceConfigs["local:tv"]).not.toHaveProperty("wsToken");
+  });
+
+  it("preserves the stored wsToken across a whole-map save that omits it", async () => {
+    store.deviceConfigs = { "local:tv": { host: "1.2.3.4", wsToken: "secret" } };
+    // The renderer never sends wsToken (only paired), yet the token must survive the save.
+    await saveSettings({
+      deviceConfigs: {
+        "local:tv": {
+          alias: "TV",
+          description: "",
+          pcInput: "",
+          wakeHotkey: "",
+          offHotkey: "",
+          host: "1.2.3.4",
+          mac: "",
+          inputKeySeq: "",
+          paired: true,
+        },
+      },
+    });
+    expect(store.deviceConfigs!["local:tv"].wsToken).toBe("secret");
+    expect(store.deviceConfigs!["local:tv"].alias).toBe("TV");
   });
 });

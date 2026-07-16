@@ -1,5 +1,6 @@
 import { parseStatus, mainCapabilities, pickTV, isTV } from "../domain/tv.js";
 import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain/tv.js";
+import type { TVTransport } from "./transport.js";
 import { log } from "../log.js";
 
 const BASE = "https://api.smartthings.com/v1";
@@ -14,8 +15,9 @@ export function fetchErrorDetail(err: unknown): string {
   return String(err);
 }
 
-// Minimal SmartThings REST client (cloud control — no LAN access needed).
-export class SmartThings {
+// Minimal SmartThings REST client (cloud control — no LAN access needed). Conforms to TVTransport
+// so app.ts can swap in a LAN transport without knowing which one it holds.
+export class SmartThings implements TVTransport {
   constructor(private readonly token: string) {}
 
   private async req<T>(path: string, init?: RequestInit): Promise<T> {

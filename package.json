@@ -30,6 +30,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.0.3",
     "electron": "^42.5.0",
     "electron-builder": "^26.15.3",
@@ -80,5 +81,8 @@
       ],
       "icon": "build/icon.png"
     }
+  },
+  "dependencies": {
+    "ws": "^8.21.1"
   }
 }

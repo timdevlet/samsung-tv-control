@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import type { AppSettings, AuthStatus } from "../../types";
+import type { AppSettings } from "../../types";
 import { AppHeader } from "../../components/AppHeader";
 import { Button } from "../../components/Button";
-import { DangerZone } from "../../components/DangerZone";
-import { Disclosure } from "../../components/Disclosure";
 import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
 import { HintPills } from "../../components/HintPills";
@@ -18,7 +15,6 @@ import { TextInput } from "../../components/TextInput";
 import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { DeviceList } from "./DeviceList";
-import { OAuthClientFields } from "./OAuthClientFields";
 import "./SettingsOverlay.scss";
 
 const PC_INPUT_HINTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"] as const;
@@ -29,21 +25,24 @@ const THEME_OPTIONS = [
   { value: "system", label: "System" },
 ] as const;
 
+// The "Add a TV" tab edits a scratch deviceConfigs entry under this key; it must never be
+// persisted as a real device (pairing creates the real local:<mac> entry instead).
+const ADD_TAB = "__add__";
+function stripAddScratch<T>(configs: Record<string, T>): Record<string, T> {
+  if (!(ADD_TAB in configs)) return configs;
+  const { [ADD_TAB]: _drop, ...rest } = configs;
+  return rest;
+}
+
 // The whole Settings screen. Mounted only while open — every open gets fresh state: the draft
 // re-seeded from initialSettings, the device list reloaded, Account's additional options
 // re-collapsed. There is no Save button: every change autosaves (see useSettingsForm).
 export function SettingsOverlay({
   initialSettings,
-  authorized,
   onClose,
-  onAuthChanged,
 }: {
   initialSettings: AppSettings;
-  // Initial auth state; fetched fresh by App right before mounting. Signing in from the Account
-  // group updates it live.
-  authorized: boolean;
   onClose: () => void;
-  onAuthChanged: () => Promise<AuthStatus>;
 }) {
   const { state: devices, reload: reloadDevices } = useDeviceList();
   // Lets the persist closure read the *current* list state without retriggering an autosave
@@ -53,15 +52,11 @@ export function SettingsOverlay({
 
   const form = useSettingsForm(initialSettings, async (draft) => {
     const deviceState = devicesRef.current;
-    // Blank OAuth/pcInput strings are ignored by the main process (a saved value can't be
-    // blanked by accident — see src/electron/settings.ts); hotkeys apply as-is, "" meaningfully
-    // unbinds. The device selection is only persisted while the rows are actually rendered —
-    // autosaving while the list isn't loaded (signed out / error) must not clear the stored
-    // selection.
+    // Blank pcInput is ignored by the main process (a saved value can't be blanked by accident —
+    // see src/electron/settings.ts); hotkeys apply as-is, "" meaningfully unbinds. The device
+    // selection/config is only persisted while the rows are actually rendered — autosaving while
+    // the list isn't loaded must not clear the stored selection.
     const res = await window.tvAPI.saveSettings({
-      clientId: draft.clientId.trim(),
-      clientSecret: draft.clientSecret.trim(),
-      redirectUri: draft.redirectUri.trim(),
       pcInput: draft.pcInput.trim(),
       minimizeToTrayOnClose: draft.minimizeToTrayOnClose,
       wakeHotkey: draft.wakeHotkey,
@@ -72,15 +67,14 @@ export function SettingsOverlay({
               .filter((d) => draft.selectedDeviceIds.has(d.deviceId))
               .map((d) => d.deviceId),
             // Whole-map replace; the draft was seeded from disk, so entries for TVs missing
-            // from the current list (temporarily unreachable) survive saves untouched.
-            deviceConfigs: draft.deviceConfigs,
+            // from the current list (temporarily unreachable) survive saves untouched. The
+            // "__add__" scratch entry (the Add-a-TV tab) is never a real device — strip it.
+            deviceConfigs: stripAddScratch(draft.deviceConfigs),
           }
         : {}),
       theme: draft.theme,
     });
     if (!res.ok) return res.error || "Failed to save settings.";
-    // A changed clientId/clientSecret can flip hasClient — keep the header pill in step.
-    await onAuthChanged();
     return draft.pcInput.trim() ? null : "PC input can't be empty — keeping the last saved value.";
   });
 
@@ -91,6 +85,8 @@ export function SettingsOverlay({
   // Per-TV tabs exist only once the list is in; until then (loading / signed out / no TVs)
   // the bar is just "All TVs".
   const hasDeviceTabs = devices.kind === "ready" && devices.devices.length > 0;
+  // The app is LAN-only: there's always an "Add a TV" tab so a first TV can be paired before any
+  // device exists (a paired TV then gets its own tab).
   const tvTabOptions = [
     { value: "all", label: "All TVs" },
     ...(hasDeviceTabs
@@ -99,6 +95,7 @@ export function SettingsOverlay({
           label: form.draft.deviceConfigs[d.deviceId]?.alias || d.label,
         }))
       : []),
+    { value: ADD_TAB, label: "+ Add a TV" },
   ];
   // A device can disappear between list loads — never leave the UI stranded on a gone tab.
   const activeTvTab = tvTabOptions.some((o) => o.value === tvTab) ? tvTab : "all";
@@ -113,48 +110,102 @@ export function SettingsOverlay({
       ? `${accelerator.trim()} (shared)`
       : undefined;
 
-  const [oauthOpen, setOauthOpen] = useState(false);
-  const [isAuthorized, setIsAuthorized] = useState(authorized);
-  const [signingIn, setSigningIn] = useState(false);
+  // Pairing/discovery status for the active per-TV tab.
+  const [pairing, setPairing] = useState(false);
+  const [discovering, setDiscovering] = useState(false);
+  // Whether the active TV currently has a stored pairing token. Seeded from settings and flipped
+  // live after a successful pair (settings are reloaded to pick up the token the main process
+  // wrote outside the draft).
+  const [pairedTabs, setPairedTabs] = useState<Record<string, boolean>>({});
   const pcInputRef = useRef<HTMLInputElement>(null);
   const deviceInputRef = useRef<HTMLInputElement>(null);
-  const clientIdRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     pcInputRef.current?.focus();
   }, []);
 
-  // OAuth-only: with no client configured, Sign in expands the "Show additional options"
-  // disclosure (the OAuth client fields) instead of opening the browser popup.
-  const onSignIn = async () => {
-    // Freshly typed OAuth fields may still be inside the autosave debounce — persist them first
-    // so authStatus/login see them.
-    await form.flush();
-    const status = await window.tvAPI.authStatus();
-    if (!status.hasClient) {
-      // The <details> must render open before its content is focusable.
-      flushSync(() => setOauthOpen(true));
-      clientIdRef.current?.focus();
-      return;
-    }
-    setSigningIn(true);
+  // Discover TVs on the LAN and auto-fill the active tab's host/mac from the
+  // first match. (A picker would be nicer for multiple TVs; first-match keeps the flow simple.)
+  const onDiscover = async () => {
+    setDiscovering(true);
     try {
-      const res = await window.tvAPI.login();
-      // Closing the OAuth popup (cancelled) is not a failure.
-      if (!res.ok && !res.cancelled && res.error) form.setError(res.error);
-      const next = await onAuthChanged();
-      setIsAuthorized(next.authorized);
-      if (next.authorized) reloadDevices();
+      const res = await window.tvAPI.discoverTVs();
+      if (!res.ok) {
+        form.setError(res.error || "Discovery failed.");
+        return;
+      }
+      const first = res.candidates[0];
+      if (!first) {
+        form.setError("No Samsung TVs found on the network — enter the IP manually.");
+        return;
+      }
+      form.setError(null);
+      form.setDeviceConfig(activeTvTab, "host", first.host);
+      if (first.mac) form.setDeviceConfig(activeTvTab, "mac", first.mac);
     } finally {
-      setSigningIn(false);
+      setDiscovering(false);
     }
   };
 
-  const onLogout = async () => {
-    await window.tvAPI.logout();
-    await onAuthChanged();
-    onClose();
+  // Local transport: pair with the active TV. Flush the draft first so the just-typed host/mac
+  // are on disk for the main process to read, then trigger the on-screen Allow + token store, then
+  // reload settings so the "Paired" indicator reflects the stored token.
+  const onPair = async () => {
+    await form.flush();
+    const cfg = form.draft.deviceConfigs[activeTvTab];
+    if (!cfg?.host?.trim()) {
+      form.setError("Enter the TV's IP address first.");
+      return;
+    }
+    setPairing(true);
+    try {
+      const res = await window.tvAPI.pairTV({
+        deviceId: activeTvTab,
+        host: cfg.host.trim(),
+        mac: cfg.mac?.trim() ?? "",
+      });
+      if (!res.ok) {
+        form.setError(res.error || "Pairing failed.");
+        return;
+      }
+      form.setError(null);
+      setPairedTabs((p) => ({ ...p, [activeTvTab]: true }));
+      reloadDevices();
+    } finally {
+      setPairing(false);
+    }
   };
+
+  // Local transport: pair a brand-new TV from the "Add a TV" tab. Unlike onPair, this passes no
+  // deviceId, so the main process mints a fresh local:<mac> device, then we clear the scratch
+  // fields, reload the list (the new TV shows as its own tab), and jump to it.
+  const onAddPair = async () => {
+    const scratch = form.draft.deviceConfigs[ADD_TAB];
+    const host = scratch?.host?.trim();
+    if (!host) {
+      form.setError("Enter the TV's IP address first, or use Discover.");
+      return;
+    }
+    setPairing(true);
+    try {
+      const res = await window.tvAPI.pairTV({ host, mac: scratch?.mac?.trim() ?? "" });
+      if (!res.ok) {
+        form.setError(res.error || "Pairing failed.");
+        return;
+      }
+      form.setError(null);
+      // Clear the scratch entry so it prunes on the next save and the fields reset for next time.
+      form.setDeviceConfig(ADD_TAB, "host", "");
+      form.setDeviceConfig(ADD_TAB, "mac", "");
+      setPairedTabs((p) => ({ ...p, [res.deviceId]: true }));
+      setTvTab(res.deviceId);
+      reloadDevices();
+    } finally {
+      setPairing(false);
+    }
+  };
+
+  const activePaired = pairedTabs[activeTvTab] ?? activeDeviceConfig?.paired ?? false;
 
   return (
     <Overlay labelledBy="settingsTitle">
@@ -167,23 +218,6 @@ export function SettingsOverlay({
         {/* The 640px column centering targets .modal-inner > * — OverlayScrollbars owns the
             direct children of .modal, so the groups need their own wrapper. */}
         <div className="modal-inner">
-          {!isAuthorized && (
-            <SettingsGroup title="Account">
-              <p className="hint">Sign in to SmartThings to control your TVs.</p>
-              <Button onClick={() => void onSignIn()} disabled={signingIn}>
-                {signingIn ? "Waiting for approval…" : "Sign in"}
-              </Button>
-              <Disclosure summary="Show additional options" open={oauthOpen} onToggle={setOauthOpen}>
-                <OAuthClientFields
-                  clientId={form.draft.clientId}
-                  clientSecret={form.draft.clientSecret}
-                  redirectUri={form.draft.redirectUri}
-                  onChange={form.set}
-                  clientIdRef={clientIdRef}
-                />
-              </Disclosure>
-            </SettingsGroup>
-          )}
           <SettingsGroup title="TV control">
             <div className="tv-tabs">
               <SegmentedControl
@@ -242,6 +276,37 @@ export function SettingsOverlay({
                     onValidationError={form.setError}
                   />
                 </Field>
+              </>
+            ) : activeTvTab === ADD_TAB ? (
+              <>
+                <p className="hint">
+                  Add a TV on your network. Turn the TV on, Discover it (or enter its address),
+                  then Pair and accept the on-screen prompt. It'll then get its own tab above.
+                </p>
+                <Field label="TV IP / host" htmlFor="addHost">
+                  <TextInput
+                    id="addHost"
+                    placeholder="e.g. 192.168.1.42"
+                    value={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
+                    onValueChange={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
+                  />
+                </Field>
+                <Field label="MAC address (for Wake-on-LAN)" htmlFor="addMac">
+                  <TextInput
+                    id="addMac"
+                    placeholder="e.g. a0:b1:c2:d3:e4:f5"
+                    value={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
+                    onValueChange={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
+                  />
+                </Field>
+                <div className="pair-row">
+                  <Button onClick={() => void onDiscover()} disabled={discovering}>
+                    {discovering ? "Searching…" : "Discover"}
+                  </Button>
+                  <Button onClick={() => void onAddPair()} disabled={pairing}>
+                    {pairing ? "Waiting for TV…" : "Pair"}
+                  </Button>
+                </div>
               </>
             ) : (
               <>
@@ -309,6 +374,52 @@ export function SettingsOverlay({
                     onValidationError={form.setError}
                   />
                 </Field>
+                <>
+                    <p className="hint">
+                      Discover this TV on the network or enter its address, then Pair (turn the TV
+                      on and accept the on-screen prompt).
+                    </p>
+                    <Field label="TV IP / host" htmlFor="tvHost">
+                      <TextInput
+                        id="tvHost"
+                        placeholder="e.g. 192.168.1.42"
+                        value={activeDeviceConfig?.host ?? ""}
+                        onValueChange={(v) => form.setDeviceConfig(activeTvTab, "host", v)}
+                      />
+                    </Field>
+                    <Field label="MAC address (for Wake-on-LAN)" htmlFor="tvMac">
+                      <TextInput
+                        id="tvMac"
+                        placeholder="e.g. a0:b1:c2:d3:e4:f5"
+                        value={activeDeviceConfig?.mac ?? ""}
+                        onValueChange={(v) => form.setDeviceConfig(activeTvTab, "mac", v)}
+                      />
+                    </Field>
+                    <Field label="Input key sequence (optional)" htmlFor="tvInputKeys">
+                      <TextInput
+                        id="tvInputKeys"
+                        placeholder="e.g. KEY_HDMI,KEY_HDMI"
+                        value={activeDeviceConfig?.inputKeySeq ?? ""}
+                        onValueChange={(v) => form.setDeviceConfig(activeTvTab, "inputKeySeq", v)}
+                      />
+                    </Field>
+                    <p className="hint">
+                      Input switching over the network is best-effort: there's no direct “set
+                      HDMI2” command, so it sends the source key — record a key sequence above to
+                      land on the right input.
+                    </p>
+                    <div className="pair-row">
+                      <Button onClick={() => void onDiscover()} disabled={discovering}>
+                        {discovering ? "Searching…" : "Discover"}
+                      </Button>
+                      <Button onClick={() => void onPair()} disabled={pairing}>
+                        {pairing ? "Waiting for TV…" : activePaired ? "Re-pair" : "Pair"}
+                      </Button>
+                      <span className="pair-status">
+                        {activePaired ? "Paired ✓" : "Not paired"}
+                      </span>
+                    </div>
+                  </>
               </>
             )}
           </SettingsGroup>
@@ -329,13 +440,6 @@ export function SettingsOverlay({
             />
           </SettingsGroup>
           <ErrorText>{form.error}</ErrorText>
-          {isAuthorized && (
-            <DangerZone description="Sign out to clear stored tokens from this device.">
-              <Button variant="danger" onClick={onLogout}>
-                Sign out
-              </Button>
-            </DangerZone>
-          )}
         </div>
       </ScrollArea>
     </Overlay>

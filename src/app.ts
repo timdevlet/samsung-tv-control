@@ -9,6 +9,10 @@ import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
 import { pickInput, isOnInput } from "./domain/tv.js";
 import { SmartThings } from "./api/smartthings.js";
+import { LocalTV } from "./api/local-tv.js";
+import type { TVTransport } from "./api/transport.js";
+import { isMockMode } from "./dev/mock-cloud.js";
+import { makeMockTransport } from "./dev/mock-transport.js";
 import type { TVStatus, STDevice } from "./domain/tv.js";
 import { log, logError } from "./log.js";
 
@@ -62,12 +66,24 @@ export function createApp(): App {
     return config.selectedDeviceIds ?? [];
   }
 
-  // DI core: load config, resolve token, build the client.
-  async function connect(inputOverride?: string): Promise<{ config: TVConfig; st: SmartThings }> {
+  // Build the transport for this invocation. Selection precedence:
+  //   1. Mock mode — an in-process fake, so `npm run electron:dev:mock` and tests never touch the
+  //      real cloud or LAN (regardless of transportMode).
+  //   2. transportMode "local" — direct LAN control (no OAuth token needed, so the cloud
+  //      token-resolution below is skipped entirely).
+  //   3. default "cloud" — the SmartThings REST client, which needs a resolved access token.
+  async function buildTransport(config: TVConfig): Promise<TVTransport> {
+    if (isMockMode()) return makeMockTransport();
+    if (config.transportMode === "local") return new LocalTV(config);
+    return new SmartThings(await resolveAccessToken(config));
+  }
+
+  // DI core: load config, build the transport (which resolves a token only in cloud mode).
+  async function connect(inputOverride?: string): Promise<{ config: TVConfig; transport: TVTransport }> {
     const config = await loadConfig();
     if (inputOverride) config.pcInput = inputOverride;
-    const st = new SmartThings(await resolveAccessToken(config));
-    return { config, st };
+    const transport = await buildTransport(config);
+    return { config, transport };
   }
 
   // Run `op` against every selected TV in parallel. One TV failing (offline, cloud error) must
@@ -79,7 +95,7 @@ export function createApp(): App {
   // hotkeys target specific TVs regardless of what's selected).
   async function forEachSelected(
     config: TVConfig,
-    st: SmartThings,
+    transport: TVTransport,
     op: (deviceId: string) => Promise<void>,
     idsOverride?: string[],
   ): Promise<boolean> {
@@ -109,12 +125,12 @@ export function createApp(): App {
   // — the TV needs a moment to come up after waking, and it only exposes its input-source map
   // once on. We return as soon as it reports `on`. If it never does we still return — the caller
   // logs and the input switch is attempted regardless.
-  async function ensurePoweredOn(st: SmartThings, deviceId: string, status: TVStatus, tag: string): Promise<TVStatus> {
+  async function ensurePoweredOn(transport: TVTransport, deviceId: string, status: TVStatus, tag: string): Promise<TVStatus> {
     for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
       log(`${tag}TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
-      await st.powerOn(deviceId);
+      await transport.powerOn(deviceId);
       await sleep(POWER_ON_RETRY_MS);
-      status = await st.getStatus(deviceId);
+      status = await transport.getStatus(deviceId);
     }
     if (status.power === "on") log(`${tag}TV is on.`);
     else log(`${tag}TV still reports off after ${POWER_ON_ATTEMPTS} attempts — it may be unreachable by the cloud (deep standby).`);
@@ -168,11 +184,11 @@ export function createApp(): App {
   }
 
   // Switch one TV to its PC input, powering it on first if needed.
-  async function switchOne(st: SmartThings, deviceId: string, pcInput: string, tag: string): Promise<void> {
+  async function switchOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string): Promise<void> {
     // 1) Check status first; if off, wake it before switching input. We re-read after waking
     // because the off-state status often doesn't include the input-source map.
-    let status = await st.getStatus(deviceId);
-    status = await ensurePoweredOn(st, deviceId, status, tag);
+    let status = await transport.getStatus(deviceId);
+    status = await ensurePoweredOn(transport, deviceId, status, tag);
 
     // If the TV never came on after all retries, stop here rather than throwing: there's no
     // input-source map to switch to, and ensurePoweredOn has already logged the give-up. Throwing
@@ -192,7 +208,7 @@ export function createApp(): App {
       log(`${tag}Input is already on ${target}.`);
     } else {
       log(`${tag}Switching input to ${target} (PC)...`);
-      await st.setInputSource(deviceId, capability, target);
+      await transport.setInputSource(deviceId, capability, target);
     }
 
     log(`${tag}Done — TV is on and switched to PC.`);
@@ -200,45 +216,54 @@ export function createApp(): App {
 
   // Switch every targeted TV to its PC input, powering each on first if needed.
   async function switchInput(inputOverride?: string, deviceIds?: string[]): Promise<boolean> {
-    const { config, st } = await connect(inputOverride);
+    const { config, transport } = await connect(inputOverride);
     const ids = deviceIds ?? resolveDeviceIds(config);
     return forEachSelected(
       config,
-      st,
+      transport,
       (deviceId) =>
-        switchOne(st, deviceId, inputFor(config, deviceId, inputOverride), deviceTag(config, deviceId, ids)),
+        switchOne(transport, deviceId, inputFor(config, deviceId, inputOverride), deviceTag(config, deviceId, ids)),
       deviceIds,
     );
   }
 
   // Turn one TV off, but only when it's currently on its PC input.
-  async function offOne(st: SmartThings, deviceId: string, pcInput: string, tag: string): Promise<void> {
-    const status = await st.getStatus(deviceId);
+  async function offOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string): Promise<void> {
+    const status = await transport.getStatus(deviceId);
 
     if (status.power === "off") {
       log(`${tag}TV is already off.`);
       return;
     }
 
+    // Best-effort input check: the cloud reports the current input, so we only power off when it's
+    // on the PC input (leaving a TV showing something else alone). A LAN transport usually can't
+    // read the input at all (no currentInput/sources) — in that case we can't tell, so we assume
+    // it's on PC and power off rather than never turning it off. When the input IS known, keep the
+    // strict check.
+    const inputKnown = Boolean(status.currentInput) || status.sources.length > 0;
     const pcSource = pickInput(status, pcInput);
-    if (!isOnInput(status, pcSource)) {
+    if (inputKnown && !isOnInput(status, pcSource)) {
       log(`${tag}TV input is "${status.currentInput ?? "?"}", not PC (${pcSource}) — leaving it on.`);
       return;
     }
+    if (!inputKnown) {
+      log(`${tag}Can't read the current input over this connection — assuming PC and turning off.`);
+    }
 
     log(`${tag}PC is sleeping and TV is on PC input — turning the TV off...`);
-    await st.powerOff(deviceId);
+    await transport.powerOff(deviceId);
     log(`${tag}Done — TV turned off.`);
   }
 
   // Turn every targeted TV off (each only if it's on its PC input).
   async function off(deviceIds?: string[]): Promise<boolean> {
-    const { config, st } = await connect();
+    const { config, transport } = await connect();
     const ids = deviceIds ?? resolveDeviceIds(config);
     return forEachSelected(
       config,
-      st,
-      (deviceId) => offOne(st, deviceId, inputFor(config, deviceId), deviceTag(config, deviceId, ids)),
+      transport,
+      (deviceId) => offOne(transport, deviceId, inputFor(config, deviceId), deviceTag(config, deviceId, ids)),
       deviceIds,
     );
   }
@@ -246,8 +271,8 @@ export function createApp(): App {
   // List account devices with their main capabilities (`--devices`).
   async function listDevices(): Promise<void> {
     const config = await loadConfig();
-    const st = new SmartThings(await resolveAccessToken(config));
-    const devices = await st.listDevices();
+    const transport = await buildTransport(config);
+    const devices = await transport.listDevices();
     if (devices.length === 0) {
       log("No devices found on this SmartThings account.");
       return;
@@ -262,8 +287,8 @@ export function createApp(): App {
   // does (load config → resolve token), then filters to input-capable devices.
   async function listTVs(): Promise<STDevice[]> {
     const config = await loadConfig();
-    const st = new SmartThings(await resolveAccessToken(config));
-    return st.listTVs();
+    const transport = await buildTransport(config);
+    return transport.listTVs();
   }
 
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.

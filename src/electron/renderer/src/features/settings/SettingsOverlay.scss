@@ -36,3 +36,17 @@
     button { flex: 0 0 auto; }
   }
 }
+
+/* Local-transport pairing controls: the Discover/Pair buttons and the paired-state label on one
+   row. */
+.pair-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+
+  .pair-status {
+    font-size: 0.85em;
+    opacity: 0.8;
+  }
+}

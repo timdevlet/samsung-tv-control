@@ -9,8 +9,11 @@ import { loadConfig, saveConfig } from "../config.js";
 import {
   normalizeDeviceConfigs,
   normalizeTheme,
+  normalizeTransportMode,
   THEME_PREFERENCES,
+  TRANSPORT_MODES,
   type ThemePreference,
+  type TransportMode,
 } from "../domain/config.js";
 import { defaultHotkeys } from "../domain/daemon.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
@@ -44,6 +47,8 @@ export interface AppSettings {
   deviceConfigs: Record<string, DeviceConfigSettings>;
   // App color theme: "light", "dark", or "system" (follow the OS setting).
   theme: ThemePreference;
+  // How commands reach the TV: "cloud" (SmartThings) or "local" (LAN control).
+  transportMode: TransportMode;
 }
 
 export interface DeviceConfigSettings {
@@ -52,6 +57,14 @@ export interface DeviceConfigSettings {
   pcInput: string;
   wakeHotkey: string;
   offHotkey: string;
+  // Local (LAN) transport fields. Editable in Settings when transportMode is "local".
+  host: string;
+  mac: string;
+  // Optional comma-separated remote-key sequence for reaching the PC input over LAN.
+  inputKeySeq: string;
+  // Read-only in the UI: true once a LAN pairing token is stored. The token itself is never sent
+  // to the renderer (a secret) — only this flag.
+  paired: boolean;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -76,11 +89,18 @@ export async function getSettings(): Promise<AppSettings> {
           pcInput: cfg.pcInput ?? "",
           wakeHotkey: cfg.wakeHotkey ?? "",
           offHotkey: cfg.offHotkey ?? "",
+          host: cfg.host ?? "",
+          mac: cfg.mac ?? "",
+          inputKeySeq: cfg.inputKeySeq ?? "",
+          // Expose only whether a pairing token exists — never the token itself.
+          paired: Boolean(cfg.wsToken),
         },
       ]),
     ),
     // Defaults to dark (the historical appearance) when unset or invalid.
     theme: normalizeTheme(config.theme),
+    // Defaults to "cloud" (the historical behavior) when unset or invalid.
+    transportMode: normalizeTransportMode(config.transportMode),
   };
 }
 
@@ -121,12 +141,26 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   // Whole-map replace, like selectedDeviceIds: the renderer always sends the complete map, and
   // replacing is what lets clearing all of a TV's fields delete its entry (the sanitizer prunes
   // all-empty entries). A malformed payload normalizes to only its valid entries.
+  //
+  // The renderer never sees wsToken (it's a secret set by the pairing IPC), so a naive replace
+  // would wipe every paired TV's token. Carry each token forward from the stored config by
+  // deviceId before normalizing.
   if (typeof partial.deviceConfigs === "object" && partial.deviceConfigs !== null) {
-    config.deviceConfigs = normalizeDeviceConfigs(partial.deviceConfigs);
+    const stored = config.deviceConfigs ?? {};
+    const merged: Record<string, unknown> = {};
+    for (const [id, cfg] of Object.entries(partial.deviceConfigs)) {
+      const token = stored[id]?.wsToken;
+      merged[id] = token ? { ...cfg, wsToken: token } : cfg;
+    }
+    config.deviceConfigs = normalizeDeviceConfigs(merged);
   }
   // Only the three known values are accepted — a malformed IPC payload can't corrupt the config.
   if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {
     config.theme = partial.theme;
+  }
+  // Only the known transport modes are accepted — a malformed payload can't corrupt the config.
+  if (TRANSPORT_MODES.includes(partial.transportMode as TransportMode)) {
+    config.transportMode = partial.transportMode;
   }
   await saveConfig(config);
 }

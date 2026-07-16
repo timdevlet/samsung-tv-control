@@ -13,6 +13,9 @@ type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolea
 type DeviceListResult =
   | { ok: true; devices: STDevice[] }
   | { ok: false; error: string; notAuthorized?: boolean };
+type DiscoveredTV = { host: string; name?: string; mac?: string };
+type DiscoverResult = { ok: true; candidates: DiscoveredTV[] } | { ok: false; error: string };
+type PairResult = { ok: true; deviceId: string } | { ok: false; error?: string };
 
 const tvAPI = {
   // Subscribe to live log lines. Returns an unsubscribe function.
@@ -37,6 +40,11 @@ const tvAPI = {
     ipcRenderer.invoke("settings:save", partial),
   // The account's TVs, for the Settings device-selection list.
   listTVs: (): Promise<DeviceListResult> => ipcRenderer.invoke("devices:list"),
+  // Local transport: find Samsung TVs on the LAN, and pair with one (pops the on-screen Allow
+  // and stores the returned token).
+  discoverTVs: (): Promise<DiscoverResult> => ipcRenderer.invoke("tv:discover"),
+  pairTV: (args: { deviceId?: string; host: string; mac: string }): Promise<PairResult> =>
+    ipcRenderer.invoke("tv:pair", args),
   // Open the Settings modal when asked from the tray. Returns an unsubscribe function.
   onOpenSettings: (cb: () => void): (() => void) => {
     const handler = (): void => cb();

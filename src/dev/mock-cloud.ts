@@ -8,7 +8,7 @@ import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CONFIG_PATH } from "../config.js";
 import { INPUT_CAPABILITIES, mainCapabilities } from "../domain/tv.js";
-import type { RawDevice } from "../domain/tv.js";
+import type { RawDevice, RawStatus } from "../domain/tv.js";
 import { MOCK_DEVICES, statusBody } from "./fixtures.js";
 
 const API_BASE = "https://api.smartthings.com/v1";
@@ -41,17 +41,56 @@ interface CommandBody {
   commands?: { capability?: string; command?: string; arguments?: unknown[] }[];
 }
 
-// In-memory SmartThings cloud: two TVs whose power/input state persists across calls, so
-// /status reflects prior commands. TVs start off (and on a non-PC input) so a demo walks the
-// full wake → retry → input-switch flow. Latency is injectable so tests can run at zero delay.
-export class FakeCloud {
+// The in-memory device state machine, shared by both fakes: FakeCloud (fetch-level, used by the
+// cloud transport + the fetch-based tests) and FakeTransport (src/dev/mock-transport.ts, used
+// when a TVTransport is built directly). Two TVs whose power/input persist across calls, so a
+// demo walks the full wake → retry → input-switch flow. Starts off + on a non-PC input.
+export class FakeTVState {
   private readonly state = new Map<string, DeviceState>();
 
+  constructor(readonly devices: RawDevice[] = MOCK_DEVICES) {
+    for (const d of devices) this.state.set(d.deviceId, { power: "off", currentInput: "dtv" });
+  }
+
+  has(deviceId: string): boolean {
+    return this.state.has(deviceId);
+  }
+
+  // The input capability this device advertises (mirrors the real device's main-component caps).
+  capabilityOf(deviceId: string): string {
+    const device = this.devices.find((d) => d.deviceId === deviceId);
+    const caps = device ? mainCapabilities(device) : [];
+    return INPUT_CAPABILITIES.find((c) => caps.includes(c)) ?? INPUT_CAPABILITIES[1];
+  }
+
+  // A raw /status body for this device, reflecting all prior commands.
+  statusBody(deviceId: string): RawStatus | null {
+    const state = this.state.get(deviceId);
+    if (!state) return null;
+    return statusBody(state.power, state.currentInput, this.capabilityOf(deviceId));
+  }
+
+  setPower(deviceId: string, power: "on" | "off"): void {
+    const state = this.state.get(deviceId);
+    if (state) state.power = power;
+  }
+
+  setInput(deviceId: string, input: string): void {
+    const state = this.state.get(deviceId);
+    if (state) state.currentInput = input;
+  }
+}
+
+// In-memory SmartThings cloud: routes the three REST paths the SmartThings client uses into a
+// shared FakeTVState. Latency is injectable so tests can run at zero delay.
+export class FakeCloud {
+  private readonly tvState: FakeTVState;
+
   constructor(
-    private readonly devices: RawDevice[] = MOCK_DEVICES,
+    devicesOrState: RawDevice[] | FakeTVState = MOCK_DEVICES,
     private readonly latencyMs: () => number = () => 150 + Math.random() * 200,
   ) {
-    for (const d of devices) this.state.set(d.deviceId, { power: "off", currentInput: "dtv" });
+    this.tvState = devicesOrState instanceof FakeTVState ? devicesOrState : new FakeTVState(devicesOrState);
   }
 
   // Route a request the way the real cloud would. Only the three paths the SmartThings client
@@ -61,7 +100,7 @@ export class FakeCloud {
     const path = url.slice(API_BASE.length).split("?")[0];
     const method = (init?.method ?? "GET").toUpperCase();
 
-    if (method === "GET" && path === "/devices") return json({ items: this.devices });
+    if (method === "GET" && path === "/devices") return json({ items: this.tvState.devices });
 
     const status = path.match(/^\/devices\/([^/]+)\/status$/);
     if (method === "GET" && status) return this.status(status[1]);
@@ -73,23 +112,19 @@ export class FakeCloud {
   }
 
   private status(deviceId: string): Response {
-    const device = this.devices.find((d) => d.deviceId === deviceId);
-    const state = this.state.get(deviceId);
-    if (!device || !state) return notFound(`Device ${deviceId} not found.`);
-    const capability =
-      INPUT_CAPABILITIES.find((c) => mainCapabilities(device).includes(c)) ?? INPUT_CAPABILITIES[1];
-    return json(statusBody(state.power, state.currentInput, capability));
+    const body = this.tvState.statusBody(deviceId);
+    if (!body) return notFound(`Device ${deviceId} not found.`);
+    return json(body);
   }
 
   private command(deviceId: string, rawBody: RequestInit["body"]): Response {
-    const state = this.state.get(deviceId);
-    if (!state) return notFound(`Device ${deviceId} not found.`);
+    if (!this.tvState.has(deviceId)) return notFound(`Device ${deviceId} not found.`);
     const body = JSON.parse(String(rawBody ?? "{}")) as CommandBody;
     for (const cmd of body.commands ?? []) {
       if (cmd.capability === "switch" && (cmd.command === "on" || cmd.command === "off")) {
-        state.power = cmd.command;
+        this.tvState.setPower(deviceId, cmd.command);
       } else if (cmd.command === "setInputSource") {
-        state.currentInput = String(cmd.arguments?.[0] ?? state.currentInput);
+        this.tvState.setInput(deviceId, String(cmd.arguments?.[0] ?? ""));
       }
     }
     return json({ results: (body.commands ?? []).map(() => ({ status: "ACCEPTED" })) });

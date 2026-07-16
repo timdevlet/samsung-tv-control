@@ -25,6 +25,11 @@ export interface TVStatus {
 // The two capability ids Samsung TVs expose for input switching.
 export const INPUT_CAPABILITIES = ["samsungvd.mediaInputSource", "mediaInputSource"] as const;
 
+// The synthetic input capability the LAN transport advertises (src/api/local-tv.ts). It's not a
+// real SmartThings capability — it just marks a config-driven LAN device as input-capable so
+// isTV()/switchOne() treat it like a TV.
+export const LOCAL_INPUT_CAPABILITY = "local.remoteKey";
+
 // Input selection
 
 // Pick the source id to switch to: match pcInput by id, then by label, else raw value.
@@ -86,9 +91,10 @@ export function mainCapabilities(d: RawDevice): string[] {
   return (main?.capabilities ?? []).map((c) => c.id);
 }
 
-// True when a device looks like a TV: its main component exposes an input-switching capability.
+// True when a device looks like a TV: its main component exposes an input-switching capability
+// (either a real SmartThings one, or the LAN transport's synthetic marker).
 export function isTV(d: STDevice): boolean {
-  return INPUT_CAPABILITIES.some((c) => d.capabilities.includes(c));
+  return d.capabilities.includes(LOCAL_INPUT_CAPABILITY) || INPUT_CAPABILITIES.some((c) => d.capabilities.includes(c));
 }
 
 // Pick the most likely TV from a device list: input-capable, preferring a power switch.

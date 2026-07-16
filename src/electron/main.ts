@@ -17,6 +17,9 @@ import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
 import { getSettings, saveSettings, type AppSettings } from "./settings.js";
 import { isMockMode, installMockCloud } from "../dev/mock-cloud.js";
+import { loadConfig, saveConfig } from "../config.js";
+import { discoverTVs, lookupMac } from "../api/discovery.js";
+import { pairWithTV, localDeviceId } from "../api/local-tv.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -246,15 +249,63 @@ async function start(): Promise<void> {
   // handler call reloads config + token), independent of the daemon. Returns a tagged result so
   // the renderer can show a friendly message when the user isn't signed in or the cloud call fails.
   ipcMain.handle("devices:list", async () => {
-    // Not signed in yet → return a clean "not authorized" result rather than letting listTVs()
-    // throw the CLI-oriented "run `npm run login`" message at the GUI. The renderer shows its own
-    // "Sign in to load your TVs." prompt for this case.
-    if (!(await getAuthStatus()).authorized) {
+    // Cloud mode: not signed in yet → return a clean "not authorized" result rather than letting
+    // listTVs() throw the CLI-oriented "run `npm run login`" message at the GUI. The renderer
+    // shows its own "Sign in to load your TVs." prompt for this case. Local mode has no account,
+    // so skip the auth gate — the TV list is config-driven there.
+    const local = (await getSettings()).transportMode === "local";
+    if (!local && !(await getAuthStatus()).authorized) {
       return { ok: false as const, error: "", notAuthorized: true as const };
     }
     try {
       const devices = await createApp().listTVs();
       return { ok: true as const, devices };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Local transport: discover Samsung TVs on the LAN so Settings can pre-fill a host/MAC.
+  ipcMain.handle("tv:discover", async () => {
+    if (mockMode) {
+      // No real network probe in mock mode — hand back a fake candidate the demo can "pair".
+      return { ok: true as const, candidates: [{ host: "10.0.0.42", name: "Mock Living Room TV", mac: "aa:bb:cc:dd:ee:ff" }] };
+    }
+    try {
+      const found = await discoverTVs();
+      const candidates = await Promise.all(
+        found.map(async (tv) => ({ ...tv, mac: tv.mac || (await lookupMac(tv.host)) || undefined })),
+      );
+      return { ok: true as const, candidates };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
+  // Local transport: guided pairing. Connects to the TV's remote WebSocket (which pops the
+  // on-screen "Allow"), then persists the returned token + host + mac into deviceConfigs under a
+  // stable synthetic id. The token is a secret and is written straight to config here — never
+  // round-tripped through the renderer / saveSettings.
+  ipcMain.handle("tv:pair", async (_e, args: { deviceId?: string; host: string; mac: string }) => {
+    const host = args?.host?.trim();
+    const mac = args?.mac?.trim() ?? "";
+    if (!host) return { ok: false as const, error: "Enter the TV's IP address first." };
+    try {
+      const token = mockMode ? "mock-ws-token" : await pairWithTV(host);
+      const config = await loadConfig();
+      // Write the token onto the same entry the per-TV fields are edited against — the active
+      // tab's deviceId. Only when there's no tab id (paired straight from discovery, no existing
+      // entry) do we mint a synthetic local:<mac> id.
+      const deviceId = args?.deviceId?.trim() || localDeviceId({ host, mac });
+      const configs = { ...(config.deviceConfigs ?? {}) };
+      configs[deviceId] = { ...configs[deviceId], host, ...(mac ? { mac } : {}), wsToken: token };
+      config.deviceConfigs = configs;
+      // Auto-select the freshly paired TV so it's immediately actionable.
+      const selected = new Set(config.selectedDeviceIds ?? []);
+      selected.add(deviceId);
+      config.selectedDeviceIds = [...selected];
+      await saveConfig(config);
+      return { ok: true as const, deviceId };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
     }
