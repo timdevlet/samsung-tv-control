@@ -64,10 +64,9 @@ You need three things in place before the app can control anything.
 
    - **OAuth (recommended, permanent).** Create a SmartThings *OAuth-In* app in the
      [SmartThings Developer Workspace](https://developer.smartthings.com/) (or via the
-     SmartThings CLI) to get a **Client ID** and **Client Secret**. Use redirect URI
-     `https://httpbin.org/get` and scopes `r:devices:* x:devices:* r:locations:*`
-     (the app's defaults). You'll paste the Client ID/Secret into **Settings →
-     Advanced** and click **Sign in**. Tokens are stored and auto-refresh, so an
+     SmartThings CLI) to get a **Client ID** and **Client Secret**. You'll paste 
+     the Client ID/Secret into **Settings → Advanced** and click **Sign in**. 
+     Tokens are stored and auto-refresh, so an
      unattended startup launch keeps working across reboots.
 
      > A refresh token expires only after 30 days of non-use; normal daily use keeps it alive.

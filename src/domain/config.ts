@@ -12,6 +12,19 @@ export type TransportMode = "cloud" | "local";
 
 export const TRANSPORT_MODES: readonly TransportMode[] = ["cloud", "local"];
 
+// Sentinel wsToken for a TV that accepts the connection but issues no token — some Samsung models
+// authorize a client by name/IP and never send one on ms.channel.connect. We still need a
+// non-empty marker so the TV persists as paired (empty wsToken = "not paired", and
+// normalizeDeviceConfigs prunes empty tokens). At send time this sentinel maps back to a
+// token-less connection (see RoutingTransport.sendKeys / wsTokenForConnect).
+export const NO_TOKEN_PAIRED = "__no_token__";
+
+// The wsToken value to actually put on the wire: the sentinel means "paired, connect without a
+// token", so it resolves to undefined (remoteUrl then builds a token-less URL).
+export function wsTokenForConnect(wsToken?: string): string | undefined {
+  return wsToken && wsToken !== NO_TOKEN_PAIRED ? wsToken : undefined;
+}
+
 // A TV's own settings, all optional — an unset field falls back to the app-wide behavior.
 export interface DeviceConfig {
   // Custom display name shown instead of the SmartThings label (e.g. "65 TV").

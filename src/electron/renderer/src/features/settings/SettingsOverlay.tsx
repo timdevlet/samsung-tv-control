@@ -68,9 +68,21 @@ export function SettingsOverlay({
   const form = useSettingsForm(initialSettings, async (draft) => {
     const deviceState = devicesRef.current;
     // Blank pcInput is ignored by the main process (a saved value can't be blanked by accident —
-    // see src/electron/settings.ts); hotkeys apply as-is, "" meaningfully unbinds. The device
-    // selection/config is only persisted while the rows are actually rendered — autosaving while
-    // the list isn't loaded must not clear the stored selection.
+    // see src/electron/settings.ts); hotkeys apply as-is, "" meaningfully unbinds.
+    //
+    // The device selection/config is persisted from the draft, which is always seeded from disk
+    // (getSettings) — so autosaving while the list is still loading can't spuriously clear stored
+    // state. This is essential for a local-only setup: a not-yet-paired LAN TV never appears in
+    // the live device list (listTVs only returns entries that already have a host on disk), so
+    // gating on deviceState === "ready" would drop the host/mac/inputKeySeq edits that create it.
+    // When the list *is* ready we filter selection against the live devices (dropping ids for TVs
+    // that vanished from the account); otherwise we persist the draft selection as-is.
+    const selectedDeviceIds =
+      deviceState.kind === "ready"
+        ? deviceState.devices
+            .filter((d) => draft.selectedDeviceIds.has(d.deviceId))
+            .map((d) => d.deviceId)
+        : [...draft.selectedDeviceIds];
     const res = await window.tvAPI.saveSettings({
       // Cloud (Experimental) OAuth client — blank values are ignored by the main process so a saved
       // client can't be blanked by accident (see src/electron/settings.ts).
@@ -81,17 +93,12 @@ export function SettingsOverlay({
       minimizeToTrayOnClose: draft.minimizeToTrayOnClose,
       wakeHotkey: draft.wakeHotkey,
       offHotkey: draft.offHotkey,
-      ...(deviceState.kind === "ready"
-        ? {
-            selectedDeviceIds: deviceState.devices
-              .filter((d) => draft.selectedDeviceIds.has(d.deviceId))
-              .map((d) => d.deviceId),
-            // Whole-map replace; the draft was seeded from disk, so entries for TVs missing
-            // from the current list (temporarily unreachable) survive saves untouched. The
-            // "__add__" scratch entry (the Add-a-TV tab) is never a real device — strip it.
-            deviceConfigs: stripAddScratch(draft.deviceConfigs),
-          }
-        : {}),
+      selectedDeviceIds,
+      // Whole-map replace; the draft was seeded from disk, so entries for TVs missing from the
+      // current list (temporarily unreachable) survive saves untouched. The main process carries
+      // each stored wsToken forward by deviceId, and prunes all-empty entries. The "__add__"
+      // scratch entry (the Add-a-TV tab) is never a real device — strip it.
+      deviceConfigs: stripAddScratch(draft.deviceConfigs),
       theme: draft.theme,
     });
     if (!res.ok) return res.error || "Failed to save settings.";

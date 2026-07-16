@@ -5,10 +5,11 @@ import {
   remoteUrl,
   connectRemote,
   localDeviceId,
+  pairWithTV,
   LocalTV,
   type MinimalWebSocket,
 } from "../src/api/local-tv.js";
-import { canonicalizeMac } from "../src/domain/config.js";
+import { canonicalizeMac, NO_TOKEN_PAIRED } from "../src/domain/config.js";
 import type { TVConfig } from "../src/domain/config.js";
 
 // A scriptable fake WebSocket: capture sent frames, and let the test drive open/message/close.
@@ -111,6 +112,23 @@ describe("connectRemote", () => {
   });
 });
 
+describe("pairWithTV", () => {
+  it("returns the token the TV issues", async () => {
+    const ws = new FakeWS();
+    const p = pairWithTV("1.2.3.4", () => ws);
+    ws.accept("issued-token");
+    expect(await p).toBe("issued-token");
+    expect(ws.closed).toBe(true);
+  });
+  it("returns the NO_TOKEN_PAIRED sentinel when the TV accepts but sends no token", async () => {
+    // Some Samsung models authorize by name/IP and never hand back a token — still a valid pair.
+    const ws = new FakeWS();
+    const p = pairWithTV("1.2.3.4", () => ws);
+    ws.accept(); // no token in the handshake
+    expect(await p).toBe(NO_TOKEN_PAIRED);
+  });
+});
+
 describe("localDeviceId", () => {
   it("keys by canonical MAC, falling back to host", () => {
     expect(localDeviceId({ mac: "A0-B1-C2-D3-E4-F5" })).toBe("local:a0:b1:c2:d3:e4:f5");
@@ -137,6 +155,21 @@ describe("LocalTV", () => {
     await new LocalTV(config, factory).powerOff("local:tv");
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_POWER"]);
     expect(ws.closed).toBe(true);
+  });
+
+  it("connects without a token when the stored wsToken is the NO_TOKEN_PAIRED sentinel", async () => {
+    const sentinelConfig: TVConfig = {
+      ...config,
+      deviceConfigs: { "local:tv": { ...config.deviceConfigs!["local:tv"], wsToken: NO_TOKEN_PAIRED } },
+    };
+    const ws = new FakeWS();
+    const factory = (url: string) => {
+      expect(url).not.toContain("token=");
+      queueMicrotask(() => ws.accept());
+      return ws;
+    };
+    await new LocalTV(sentinelConfig, factory).powerOff("local:tv");
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_POWER"]);
   });
 
   it("setInputSource replays a configured key sequence", async () => {

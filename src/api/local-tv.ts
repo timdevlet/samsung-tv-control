@@ -19,7 +19,13 @@
 
 import { createSocket } from "node:dgram";
 import WebSocket from "ws";
-import { canonicalizeMac, type DeviceConfig, type TVConfig } from "../domain/config.js";
+import {
+  canonicalizeMac,
+  NO_TOKEN_PAIRED,
+  wsTokenForConnect,
+  type DeviceConfig,
+  type TVConfig,
+} from "../domain/config.js";
 import { isTV, pickTV, LOCAL_INPUT_CAPABILITY, type STDevice, type TVStatus } from "../domain/tv.js";
 import type { TVTransport } from "./transport.js";
 import { log } from "../log.js";
@@ -167,7 +173,10 @@ export function connectRemote(
 }
 
 // One-time pairing: connect without a token (pops the on-screen Allow), return the token the TV
-// issues. Used by the tv:pair IPC (src/electron/main.ts), not by command handling.
+// issues. Used by the tv:pair IPC (src/electron/main.ts), not by command handling. Some Samsung
+// models authorize a client by name/IP and never send a token on ms.channel.connect — that's
+// still a successful pair, so return the NO_TOKEN_PAIRED sentinel (a non-empty marker so the TV
+// persists as paired; it maps back to a token-less connection at send time via wsTokenForConnect).
 export async function pairWithTV(
   host: string,
   wsFactory: WebSocketFactory = defaultWsFactory,
@@ -175,8 +184,7 @@ export async function pairWithTV(
 ): Promise<string> {
   const conn = await connectRemote(host, undefined, wsFactory, timeoutMs);
   conn.close();
-  if (!conn.token) throw new Error("The TV accepted the connection but returned no token — try re-pairing.");
-  return conn.token;
+  return conn.token || NO_TOKEN_PAIRED;
 }
 
 // The real WebSocket, via the `ws` package. The Samsung TV serves the remote channel over TLS
@@ -242,7 +250,9 @@ export class LocalTV implements TVTransport {
   // Open one WS, send the keys in order, close it.
   private async sendKeys(deviceId: string, keys: string[]): Promise<void> {
     const cfg = this.deviceConfig(deviceId);
-    const conn = await connectRemote(cfg.host!, cfg.wsToken, this.wsFactory);
+    // A NO_TOKEN_PAIRED sentinel means "paired, connect without a token" — resolve it to undefined
+    // so remoteUrl builds a token-less URL.
+    const conn = await connectRemote(cfg.host!, wsTokenForConnect(cfg.wsToken), this.wsFactory);
     try {
       for (const key of keys) await conn.send(key);
     } finally {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { pickInput, isOnInput, parseStatus, pickTV, isTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
-import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, normalizeTheme, type TVConfig } from "../src/domain/config.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, normalizeTheme, wsTokenForConnect, NO_TOKEN_PAIRED, type TVConfig } from "../src/domain/config.js";
 import { hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
@@ -186,6 +186,12 @@ describe("config policy", () => {
     const before: TVConfig = { pcInput: "HDMI2", clientId: "cid", refreshToken: "rt" };
     clearTokens(before);
     expect(before.refreshToken).toBe("rt");
+  });
+  it("wsTokenForConnect passes a real token through and maps the sentinel/empty to undefined", () => {
+    expect(wsTokenForConnect("real-token")).toBe("real-token");
+    expect(wsTokenForConnect(NO_TOKEN_PAIRED)).toBeUndefined();
+    expect(wsTokenForConnect(undefined)).toBeUndefined();
+    expect(wsTokenForConnect("")).toBeUndefined();
   });
 });
 
