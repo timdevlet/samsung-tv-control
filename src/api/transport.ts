@@ -19,9 +19,7 @@ export interface TVTransport {
   // uses a sentinel it recognizes); `source` is the resolved input id (e.g. "HDMI2").
   setInputSource(deviceId: string, capability: string, source: string): Promise<void>;
   // All devices on the "account" (cloud) or configured locally (LAN), for the device list.
+  // Callers derive the TV subset with domain/tv.ts's isTV/pickTV — filtering is not a per-
+  // transport concern, so the interface stays one method per actual I/O shape.
   listDevices(): Promise<STDevice[]>;
-  // Just the TVs (input-capable devices).
-  listTVs(): Promise<STDevice[]>;
-  // The most likely single TV, or null if none.
-  findTV(): Promise<STDevice | null>;
 }

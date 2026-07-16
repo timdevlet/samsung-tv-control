@@ -1,4 +1,4 @@
-import { parseStatus, mainCapabilities, pickTV, isTV } from "../domain/tv.js";
+import { parseStatus, mainCapabilities } from "../domain/tv.js";
 import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain/tv.js";
 import type { TVTransport } from "./transport.js";
 import { log } from "../log.js";
@@ -71,16 +71,6 @@ export class SmartThings implements TVTransport {
       capabilities: mainCapabilities(d),
       source: "cloud" as const,
     }));
-  }
-
-  // Just the TVs on the account: devices whose main component can switch inputs.
-  async listTVs(): Promise<STDevice[]> {
-    return (await this.listDevices()).filter(isTV);
-  }
-
-  // Pick the most likely TV: a device whose main component can switch inputs.
-  async findTV(): Promise<STDevice | null> {
-    return pickTV(await this.listDevices());
   }
 
   // Read power state, the input capability in use, current input, and the source list.

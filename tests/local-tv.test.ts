@@ -11,6 +11,7 @@ import {
 } from "../src/api/local-tv.js";
 import { canonicalizeMac, NO_TOKEN_PAIRED } from "../src/domain/config.js";
 import type { TVConfig } from "../src/domain/config.js";
+import { isTV } from "../src/domain/tv.js";
 
 // A scriptable fake WebSocket: capture sent frames, and let the test drive open/message/close.
 class FakeWS implements MinimalWebSocket {
@@ -139,7 +140,6 @@ describe("localDeviceId", () => {
 describe("LocalTV", () => {
   const config: TVConfig = {
     pcInput: "HDMI2",
-    transportMode: "local",
     deviceConfigs: {
       "local:tv": { host: "1.2.3.4", mac: "a0:b1:c2:d3:e4:f5", wsToken: "stored-token" },
     },
@@ -198,8 +198,8 @@ describe("LocalTV", () => {
     vi.unstubAllGlobals();
   });
 
-  it("listTVs is config-driven and recognizes the LAN device as a TV", async () => {
-    const tvs = await new LocalTV(config).listTVs();
+  it("listDevices is config-driven and the LAN device passes the isTV filter", async () => {
+    const tvs = (await new LocalTV(config).listDevices()).filter(isTV);
     expect(tvs).toHaveLength(1);
     expect(tvs[0].deviceId).toBe("local:tv");
     expect(tvs[0].capabilities).toContain("local.remoteKey");

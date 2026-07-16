@@ -7,7 +7,7 @@
 
 import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
-import { pickInput, isOnInput, isTV, pickTV } from "./domain/tv.js";
+import { pickInput, isOnInput, isTV } from "./domain/tv.js";
 import { SmartThings } from "./api/smartthings.js";
 import { LocalTV } from "./api/local-tv.js";
 import type { TVTransport } from "./api/transport.js";
@@ -33,8 +33,8 @@ function isLocalDeviceId(deviceId: string): boolean {
 // Runs the cloud and local transports side by side. Per-device operations are dispatched by
 // deviceId (local ids → LocalTV, cloud UUIDs → SmartThings); the cloud client is built lazily and
 // only when needed, so a local-only, signed-out user never triggers token resolution (which throws
-// when no credentials exist). listDevices/listTVs/findTV merge both sources, degrading to
-// local-only if the cloud is unreachable/unauthorized rather than emptying the whole list.
+// when no credentials exist). listDevices merges both sources, degrading to local-only if the
+// cloud is unreachable/unauthorized rather than emptying the whole list.
 class RoutingTransport implements TVTransport {
   private readonly local: LocalTV;
   private cloudClient?: SmartThings;
@@ -85,14 +85,6 @@ class RoutingTransport implements TVTransport {
       log(`Cloud device list unavailable (${err instanceof Error ? err.message : String(err)}) — showing local TVs only.`);
     }
     return [...local, ...cloud];
-  }
-
-  async listTVs(): Promise<STDevice[]> {
-    return (await this.listDevices()).filter(isTV);
-  }
-
-  async findTV(): Promise<STDevice | null> {
-    return pickTV(await this.listDevices());
   }
 }
 
@@ -259,6 +251,7 @@ export function createApp(): App {
     // 1) Check status first; if off, wake it before switching input. We re-read after waking
     // because the off-state status often doesn't include the input-source map.
     let status = await transport.getStatus(deviceId);
+    const wasOn = status.power === "on";
     status = await ensurePoweredOn(transport, deviceId, status, tag);
 
     // If the TV never came on after all retries, stop here rather than throwing: there's no
@@ -274,6 +267,18 @@ export function createApp(): App {
         "This device doesn't expose an input-source capability via SmartThings, so the source can't be changed.",
       );
     }
+    // Best-effort input check, mirroring offOne: the LAN transport can't read the current input
+    // (no currentInput/sources), and its input "switch" sends remote keys that move RELATIVE to
+    // whatever input is active (KEY_HDMI and recorded sequences cycle). When the TV was already on
+    // — the auto-wake-on-resume and boot-reconcile cases — it's almost certainly still on the PC
+    // input, so sending keys blind would cycle AWAY from it. Skip instead. A TV we just woke gets
+    // the keys as before (it needs them to land on the PC input).
+    const inputKnown = Boolean(status.currentInput) || status.sources.length > 0;
+    if (!inputKnown && wasOn) {
+      log(`${tag}TV was already on and its input can't be read over this connection — leaving the input unchanged.`);
+      return;
+    }
+
     const target = pickInput(status, pcInput);
     if (isOnInput(status, target)) {
       log(`${tag}Input is already on ${target}.`);
@@ -359,7 +364,7 @@ export function createApp(): App {
   async function listTVs(): Promise<STDevice[]> {
     const config = await loadConfig();
     const transport = await buildTransport(config);
-    return transport.listTVs();
+    return (await transport.listDevices()).filter(isTV);
   }
 
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.

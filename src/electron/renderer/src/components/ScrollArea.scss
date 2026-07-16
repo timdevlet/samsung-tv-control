@@ -14,3 +14,6 @@
   --os-handle-perpendicular-size-active: 100%;
   --os-handle-min-size: 40px;
 }
+
+/* Keep the vertical thumb from running under the fixed glass header. */
+.os-theme-app.os-scrollbar-vertical { top: var(--header-height); }

@@ -26,7 +26,7 @@ import {
   type DeviceConfig,
   type TVConfig,
 } from "../domain/config.js";
-import { isTV, pickTV, LOCAL_INPUT_CAPABILITY, type STDevice, type TVStatus } from "../domain/tv.js";
+import { LOCAL_INPUT_CAPABILITY, type STDevice, type TVStatus } from "../domain/tv.js";
 import type { TVTransport } from "./transport.js";
 import { log } from "../log.js";
 
@@ -272,14 +272,6 @@ export class LocalTV implements TVTransport {
       capabilities: ["switch", LOCAL_INPUT_CAPABILITY],
       source: "local" as const,
     }));
-  }
-
-  async listTVs(): Promise<STDevice[]> {
-    return (await this.listDevices()).filter(isTV);
-  }
-
-  async findTV(): Promise<STDevice | null> {
-    return pickTV(await this.listDevices());
   }
 }
 

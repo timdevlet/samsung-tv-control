@@ -122,9 +122,13 @@ function captureCode(
       if (input.type === "keyDown" && input.key === "Escape" && !authWin.isDestroyed()) authWin.close();
     });
 
-    const onNavigate = (url: string): void => {
+    const onNavigate = (url: string, event?: Electron.Event): void => {
       const hit = extractCode(url, redirectUri);
       if (!hit) return;
+      // The default redirect target is a third-party echo service (httpbin.org) that would
+      // receive — and could log — the authorization code in its query string. Once the code is
+      // captured from the redirect URL, cancel the navigation so the request never goes out.
+      event?.preventDefault();
       if (hit.error) finish(() => reject(new Error(`Authorization was denied: ${hit.error}`)));
       else if (hit.code) finish(() => resolve(hit.code!));
     };
@@ -138,9 +142,10 @@ function captureCode(
       }
     };
 
-    // will-redirect catches the 302 to the redirect URI before it loads; did-navigate covers the
-    // case where the page loads directly. Both feed the same one-shot handler.
-    authWin.webContents.on("will-redirect", (_e, url) => onNavigate(url));
+    // will-redirect catches the 302 to the redirect URI BEFORE it loads (and cancels it — see
+    // onNavigate); did-navigate covers the case where the page loads directly. Same one-shot
+    // handler either way.
+    authWin.webContents.on("will-redirect", (e, url) => onNavigate(url, e));
     authWin.webContents.on("did-navigate", (_e, url) => onNavigate(url));
     authWin.webContents.on("did-navigate-in-page", (_e, url) => onNavigate(url));
     authWin.on("closed", onClosed);

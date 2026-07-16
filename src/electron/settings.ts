@@ -5,15 +5,12 @@
 // config.ts does the actual persistence, so this writes the same smartthings-config.json the
 // rest of the app reads.
 
-import { loadConfig, saveConfig } from "../config.js";
+import { loadConfig, updateConfig, type TVConfig } from "../config.js";
 import {
   normalizeDeviceConfigs,
   normalizeTheme,
-  normalizeTransportMode,
   THEME_PREFERENCES,
-  TRANSPORT_MODES,
   type ThemePreference,
-  type TransportMode,
 } from "../domain/config.js";
 import { defaultHotkeys } from "../domain/daemon.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
@@ -47,8 +44,6 @@ export interface AppSettings {
   deviceConfigs: Record<string, DeviceConfigSettings>;
   // App color theme: "light", "dark", or "system" (follow the OS setting).
   theme: ThemePreference;
-  // How commands reach the TV: "cloud" (SmartThings) or "local" (LAN control).
-  transportMode: TransportMode;
 }
 
 export interface DeviceConfigSettings {
@@ -57,7 +52,7 @@ export interface DeviceConfigSettings {
   pcInput: string;
   wakeHotkey: string;
   offHotkey: string;
-  // Local (LAN) transport fields. Editable in Settings when transportMode is "local".
+  // Local (LAN) transport fields — set for LAN-paired TVs; cloud TVs leave them empty.
   host: string;
   mac: string;
   // Optional comma-separated remote-key sequence for reaching the PC input over LAN.
@@ -99,8 +94,6 @@ export async function getSettings(): Promise<AppSettings> {
     ),
     // Defaults to dark (the historical appearance) when unset or invalid.
     theme: normalizeTheme(config.theme),
-    // Defaults to "cloud" (the historical behavior) when unset or invalid.
-    transportMode: normalizeTransportMode(config.transportMode),
   };
 }
 
@@ -109,7 +102,14 @@ export async function getSettings(): Promise<AppSettings> {
 // matching the pcInput guard. Sign out clears the tokens but deliberately keeps the OAuth client,
 // so the client is only ever changed by saving new values here.
 export async function saveSettings(partial: Partial<AppSettings>): Promise<void> {
-  const config = await loadConfig();
+  // updateConfig serializes this read-modify-write against the other config writers (token
+  // refresh, pairing), so an autosave can't clobber a token rotated mid-edit and vice versa.
+  await updateConfig((config) => {
+    applySettings(config, partial);
+  });
+}
+
+function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
   if (typeof partial.clientId === "string" && partial.clientId.trim()) {
     config.clientId = partial.clientId.trim();
   }
@@ -158,9 +158,4 @@ export async function saveSettings(partial: Partial<AppSettings>): Promise<void>
   if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {
     config.theme = partial.theme;
   }
-  // Only the known transport modes are accepted — a malformed payload can't corrupt the config.
-  if (TRANSPORT_MODES.includes(partial.transportMode as TransportMode)) {
-    config.transportMode = partial.transportMode;
-  }
-  await saveConfig(config);
 }

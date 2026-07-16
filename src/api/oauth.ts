@@ -5,7 +5,7 @@ import {
   type TokenResponse,
 } from "../domain/oauth.js";
 import type { TVConfig } from "../domain/config.js";
-import { saveConfig } from "../config.js";
+import { updateConfig } from "../config.js";
 import { fetchErrorDetail } from "./smartthings.js";
 import { log } from "../log.js";
 
@@ -67,6 +67,15 @@ async function postToken(config: TVConfig, params: Record<string, string>): Prom
   return json as TokenResponse;
 }
 
+// Persist a token response: apply it to the caller's config copy (kept current for the request
+// about to use it) and to the stored config under the write lock, so a concurrent Settings save
+// can't be clobbered by our stale copy of the rest of the file.
+async function persistTokens(config: TVConfig, tok: TokenResponse): Promise<void> {
+  const now = Date.now();
+  applyTokens(config, tok, now);
+  await updateConfig((stored) => applyTokens(stored, tok, now));
+}
+
 // One-time: exchange the browser auth code for tokens and persist them.
 export async function exchangeCode(config: TVConfig, code: string): Promise<void> {
   const tok = await postToken(config, {
@@ -74,9 +83,14 @@ export async function exchangeCode(config: TVConfig, code: string): Promise<void
     code,
     redirect_uri: config.redirectUri ?? DEFAULT_REDIRECT_URI,
   });
-  applyTokens(config, tok, Date.now());
-  await saveConfig(config);
+  await persistTokens(config, tok);
 }
+
+// The one in-flight refresh, shared by every concurrent caller. SmartThings ROTATES the refresh
+// token on each use: two callers refreshing at once (a daemon action racing the Settings device
+// list) would each spend the same one-use token, and whichever rotation persisted last could be
+// the rejected one — every later refresh then fails with invalid_grant until the user re-logs-in.
+let refreshInFlight: Promise<TokenResponse> | null = null;
 
 // Returns a valid access token, transparently refreshing when within the skew window of
 // expiry and persisting the rotated refresh token back to the config file.
@@ -88,12 +102,14 @@ export async function getAccessToken(config: TVConfig): Promise<string> {
   if (isTokenFresh(config, Date.now())) return config.accessToken!;
 
   try {
-    const tok = await postToken(config, {
+    refreshInFlight ??= postToken(config, {
       grant_type: "refresh_token",
       refresh_token: config.refreshToken,
+    }).finally(() => {
+      refreshInFlight = null;
     });
-    applyTokens(config, tok, Date.now());
-    await saveConfig(config);
+    const tok = await refreshInFlight;
+    await persistTokens(config, tok);
     return tok.access_token;
   } catch (err) {
     if ((err as Error & { oauthError?: string }).oauthError === "invalid_grant") {

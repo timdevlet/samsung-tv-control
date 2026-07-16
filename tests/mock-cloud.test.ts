@@ -129,7 +129,7 @@ describe("mock-mode auth", () => {
 
   it("hides cloud TVs when signed out; the LAN TV stays listed", async () => {
     // Signed in: both cloud TVs + the LAN TV list (mirrors RoutingTransport merging both sources).
-    const signedIn = await makeMockTransport().listTVs();
+    const signedIn = await makeMockTransport().listDevices();
     expect(signedIn.map((t) => t.deviceId)).toEqual([
       "mock-tv-1",
       "mock-tv-2",
@@ -138,7 +138,7 @@ describe("mock-mode auth", () => {
 
     await logout();
     // Signed out: only the local TV remains — cloud TVs need a signed-in account.
-    const signedOut = await makeMockTransport().listTVs();
+    const signedOut = await makeMockTransport().listDevices();
     expect(signedOut.map((t) => t.deviceId)).toEqual([MOCK_LOCAL_DEVICE_ID]);
     expect(signedOut.every((t) => t.source === "local")).toBe(true);
   });

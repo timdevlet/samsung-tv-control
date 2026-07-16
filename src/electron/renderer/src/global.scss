@@ -6,6 +6,10 @@
    nativeTheme.themeSource, which drives prefers-color-scheme here — so switching themes needs
    no renderer code, just these variable overrides. Dark is the default (historical) palette. */
 :root {
+  /* Fixed glass header (AppHeader.scss); views pad their scroll content by this much so it
+     starts below the header while still scrolling under the blur. */
+  --header-height: 44px;
+  --glass-bg: color-mix(in srgb, var(--bg) 70%, transparent);
   --bg: #0d1117;
   --panel: #161b22;
   --border: #30363d;

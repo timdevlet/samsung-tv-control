@@ -1,26 +1,22 @@
 import type { ReactNode } from "react";
 import "./AppHeader.scss";
 
-// Universal header — one component, one style, shared by the main screen and Settings. Children
-// (status pill, buttons) render after the title, which pushes them right via margin-right: auto.
+// macOS-style glass toolbar, fixed over the content: title on the left (after the traffic
+// lights on macOS), the view tabs dead-centered, and contextual actions on the right.
 export function AppHeader({
   title,
-  subtitle,
-  titleId,
-  children,
+  tabs,
+  actions,
 }: {
   title: string;
-  subtitle?: string;
-  titleId?: string;
-  children?: ReactNode;
+  tabs?: ReactNode;
+  actions?: ReactNode;
 }) {
   return (
-    <div className="app-header">
-      <h2 className="title" id={titleId}>
-        {title}
-        {subtitle && <small>{subtitle}</small>}
-      </h2>
-      {children}
-    </div>
+    <header className="app-header">
+      <h2 className="title">{title}</h2>
+      {tabs && <div className="header-tabs">{tabs}</div>}
+      <div className="header-actions">{actions}</div>
+    </header>
   );
 }

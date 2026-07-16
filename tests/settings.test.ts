@@ -9,8 +9,11 @@ let store: TVConfig;
 
 vi.mock("../src/config.js", () => ({
   loadConfig: async () => ({ ...store }),
-  saveConfig: async (config: TVConfig) => {
-    store = config;
+  // Mirrors the real updateConfig: load → mutate → save, minus the write lock (tests are serial).
+  updateConfig: async (mutate: (config: TVConfig) => TVConfig | void) => {
+    const config = { ...store };
+    store = mutate(config) ?? config;
+    return store;
   },
 }));
 
@@ -128,24 +131,6 @@ describe("deviceConfigs in saveSettings", () => {
     });
     expect(store.wakeHotkey).toBe("Command+Control+E");
     expect(store.selectedDeviceIds).toEqual(["tv1"]);
-  });
-});
-
-describe("transport mode", () => {
-  it("defaults to local when unset (the app is LAN-only)", async () => {
-    expect((await getSettings()).transportMode).toBe("local");
-  });
-
-  it("still round-trips an explicit mode (cloud value stays honored if present in an old config)", async () => {
-    await saveSettings({ transportMode: "cloud" });
-    expect(store.transportMode).toBe("cloud");
-    expect((await getSettings()).transportMode).toBe("cloud");
-  });
-
-  it("ignores a malformed transport mode", async () => {
-    store.transportMode = "local";
-    await saveSettings({ transportMode: "bogus" as never });
-    expect(store.transportMode).toBe("local");
   });
 });
 

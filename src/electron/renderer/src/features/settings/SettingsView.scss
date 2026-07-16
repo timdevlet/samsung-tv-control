@@ -7,7 +7,8 @@
   background: var(--bg);
   border: none;
   border-radius: 0;
-  padding: 16px 20px 16px 0px;
+  /* Top padding clears the fixed glass header while the content still scrolls under it. */
+  padding: calc(var(--header-height) + 16px) 20px 16px 0px;
  
   p.hint {
     margin: 0 0 16px;

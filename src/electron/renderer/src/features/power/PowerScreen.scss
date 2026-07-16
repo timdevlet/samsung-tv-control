@@ -5,7 +5,9 @@
   align-items: center;
   justify-content: center;
   gap: 24px;
-  /* Optical centering: nudge the group up so it doesn't sit low under the header. */
+  /* The screen spans the full window behind the fixed glass header; pad it back out so the
+     centering happens in the visible area, plus the optical nudge upward. */
+  padding-top: var(--header-height);
   padding-bottom: 40px;
 }
 

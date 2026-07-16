@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, DeviceConfigSettings, ThemePreference, TransportMode } from "../types";
+import type { AppSettings, DeviceConfigSettings, ThemePreference } from "../types";
 
 export interface SettingsDraft {
   clientId: string;
@@ -14,8 +14,6 @@ export interface SettingsDraft {
   // main process when every field is empty).
   deviceConfigs: Record<string, DeviceConfigSettings>;
   theme: ThemePreference;
-  // Which transport (cloud/local) commands use.
-  transportMode: TransportMode;
 }
 
 const EMPTY_DEVICE_CONFIG: DeviceConfigSettings = {
@@ -53,7 +51,6 @@ export function useSettingsForm(
     selectedDeviceIds: new Set(initial.selectedDeviceIds),
     deviceConfigs: initial.deviceConfigs,
     theme: initial.theme,
-    transportMode: initial.transportMode,
   });
   const [error, setError] = useState<string | null>(null);
 

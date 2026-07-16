@@ -4,7 +4,8 @@
      with content now that overflow-y no longer zeroes its automatic minimum size. */
   min-height: 0;
   margin: 0;
-  padding: 10px 14px;
+  /* Top padding clears the fixed glass header while the lines still scroll under its blur. */
+  padding: calc(var(--header-height) + 10px) 14px 10px;
   font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
   font-size: 12.5px;
   white-space: pre-wrap;

@@ -26,3 +26,29 @@
     }
   }
 }
+
+/* macOS-toolbar variant (the header tabs): recessed rounded track with a floating neutral
+   pill for the active segment, instead of joined accent-colored buttons. */
+.segmented.segmented--pill {
+  border: none;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 2px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+
+  button {
+    border-radius: 6px;
+    padding: 3px 14px;
+    font-size: 12.5px;
+
+    + button { border-left: none; }
+
+    &:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+
+    &.active {
+      background: var(--btn-bg);
+      color: var(--text);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    }
+  }
+}

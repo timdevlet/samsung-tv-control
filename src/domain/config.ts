@@ -5,13 +5,6 @@ export type ThemePreference = "light" | "dark" | "system";
 
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["light", "dark", "system"];
 
-// How the app reaches the TV. "cloud" = the SmartThings REST API (OAuth, needs internet — the
-// historical default). "local" = direct LAN control (Wake-on-LAN + the Samsung remote WebSocket,
-// no Samsung account, works offline). Unset means "cloud" so existing configs are unchanged.
-export type TransportMode = "cloud" | "local";
-
-export const TRANSPORT_MODES: readonly TransportMode[] = ["cloud", "local"];
-
 // Sentinel wsToken for a TV that accepts the connection but issues no token — some Samsung models
 // authorize a client by name/IP and never send one on ms.channel.connect. We still need a
 // non-empty marker so the TV persists as paired (empty wsToken = "not paired", and
@@ -38,7 +31,8 @@ export interface DeviceConfig {
   wakeHotkey?: string;
   offHotkey?: string;
 
-  // Local (LAN) transport fields — used only when transportMode is "local".
+  // Local (LAN) transport fields — set for LAN-paired TVs (deviceId "local:…"); cloud TVs
+  // (SmartThings UUIDs) leave them unset.
   // The TV's LAN IP or hostname (the WebSocket + info-endpoint target).
   host?: string;
   // The TV's MAC address, for the Wake-on-LAN magic packet. Canonicalized (lowercase, colon-
@@ -124,9 +118,6 @@ export interface TVConfig {
   // App color theme. "system" follows the OS light/dark setting. Unset means dark —
   // the app's historical appearance.
   theme?: ThemePreference;
-
-  // How commands reach the TV. Unset = "cloud" (the historical SmartThings behavior).
-  transportMode?: TransportMode;
 }
 
 const DEFAULTS: TVConfig = {
@@ -134,11 +125,15 @@ const DEFAULTS: TVConfig = {
   minimizeToTrayOnClose: true,
 };
 
-// Merge parsed config over defaults and migrate the legacy "secret" key.
-export function mergeConfig(parsed: Partial<TVConfig> & { secret?: string }): TVConfig {
+// Merge parsed config over defaults and migrate/retire legacy keys.
+export function mergeConfig(parsed: Partial<TVConfig> & { secret?: string; transportMode?: string }): TVConfig {
   // Accept the legacy "secret" key as an alias for clientSecret.
   if (parsed.secret && !parsed.clientSecret) parsed.clientSecret = parsed.secret;
   delete parsed.secret;
+  // transportMode is retired: cloud and local run side by side, routed per deviceId (app.ts's
+  // RoutingTransport) — nothing selects a transport globally anymore. Drop the stale key so old
+  // configs shed it on their next save.
+  delete parsed.transportMode;
   return { ...DEFAULTS, ...parsed };
 }
 
@@ -170,14 +165,6 @@ export function normalizeTheme(value: unknown): ThemePreference {
   return THEME_PREFERENCES.includes(value as ThemePreference)
     ? (value as ThemePreference)
     : "dark";
-}
-
-// Coerce an untrusted value to a valid transport mode, defaulting to "local" when unset/malformed.
-// NOTE: transportMode no longer *selects* a transport — cloud and local run side by side and
-// app.ts's RoutingTransport dispatches per deviceId. The field is kept for back-compat (old
-// configs may carry it) and still round-trips through Settings, but nothing branches on it.
-export function normalizeTransportMode(value: unknown): TransportMode {
-  return TRANSPORT_MODES.includes(value as TransportMode) ? (value as TransportMode) : "local";
 }
 
 // Canonicalize a MAC address to lowercase colon-separated form ("AA-BB-…" / "aabb…" → "aa:bb:…")

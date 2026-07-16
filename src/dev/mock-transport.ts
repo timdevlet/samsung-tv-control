@@ -4,7 +4,7 @@
 // an in-process TVTransport over the same FakeTVState the fake cloud uses, so both the cloud and
 // local Settings UIs (and tests) drive one identical fake TV with identical log lines.
 
-import { parseStatus, mainCapabilities, isTV, pickTV } from "../domain/tv.js";
+import { parseStatus, mainCapabilities } from "../domain/tv.js";
 import type { STDevice, TVStatus } from "../domain/tv.js";
 import type { TVTransport } from "../api/transport.js";
 import { FakeTVState, isMockAuthorized } from "./mock-cloud.js";
@@ -63,14 +63,6 @@ export class FakeTransport implements TVTransport {
       // Mirror RoutingTransport: cloud TVs require a signed-in account, so they drop out on Sign
       // out; local (LAN) TVs are config-driven and always listed.
       .filter((d) => d.source === "local" || isMockAuthorized());
-  }
-
-  async listTVs(): Promise<STDevice[]> {
-    return (await this.listDevices()).filter(isTV);
-  }
-
-  async findTV(): Promise<STDevice | null> {
-    return pickTV(await this.listDevices());
   }
 }
 

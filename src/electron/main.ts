@@ -17,7 +17,7 @@ import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
 import { getSettings, saveSettings, type AppSettings } from "./settings.js";
 import { isMockMode, installMockCloud } from "../dev/mock-cloud.js";
-import { loadConfig, saveConfig } from "../config.js";
+import { updateConfig } from "../config.js";
 import { discoverTVs, lookupMac } from "../api/discovery.js";
 import { pairWithTV, localDeviceId } from "../api/local-tv.js";
 
@@ -82,6 +82,12 @@ function createWindow(): BrowserWindow {
     icon: nativeImage.createFromPath(path.join(__dirname, "icon.png")),
     backgroundColor: windowBackground(),
     autoHideMenuBar: true,
+    // macOS: hide the native title bar so the renderer's glass header owns the chrome; the
+    // traffic lights float over it, vertically centered in the 44px header (--header-height).
+    // Other platforms keep their native frame.
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 14, y: 16 } }
+      : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -125,7 +131,7 @@ function sendLog(entry: LogEntry): void {
   if (win && !win.isDestroyed()) win.webContents.send("log", entry);
 }
 
-// Surface the window and tell the renderer to open the Settings modal.
+// Surface the window and tell the renderer to switch to the Settings tab.
 function openSettings(): void {
   showWindow();
   win?.webContents.send("open-settings");
@@ -288,19 +294,20 @@ async function start(): Promise<void> {
     if (!host) return { ok: false as const, error: "Enter the TV's IP address first." };
     try {
       const token = mockMode ? "mock-ws-token" : await pairWithTV(host);
-      const config = await loadConfig();
       // Write the token onto the same entry the per-TV fields are edited against — the active
       // tab's deviceId. Only when there's no tab id (paired straight from discovery, no existing
-      // entry) do we mint a synthetic local:<mac> id.
+      // entry) do we mint a synthetic local:<mac> id. updateConfig serializes this against the
+      // Settings autosave so neither write drops the other's fields.
       const deviceId = args?.deviceId?.trim() || localDeviceId({ host, mac });
-      const configs = { ...(config.deviceConfigs ?? {}) };
-      configs[deviceId] = { ...configs[deviceId], host, ...(mac ? { mac } : {}), wsToken: token };
-      config.deviceConfigs = configs;
-      // Auto-select the freshly paired TV so it's immediately actionable.
-      const selected = new Set(config.selectedDeviceIds ?? []);
-      selected.add(deviceId);
-      config.selectedDeviceIds = [...selected];
-      await saveConfig(config);
+      await updateConfig((config) => {
+        const configs = { ...(config.deviceConfigs ?? {}) };
+        configs[deviceId] = { ...configs[deviceId], host, ...(mac ? { mac } : {}), wsToken: token };
+        config.deviceConfigs = configs;
+        // Auto-select the freshly paired TV so it's immediately actionable.
+        const selected = new Set(config.selectedDeviceIds ?? []);
+        selected.add(deviceId);
+        config.selectedDeviceIds = [...selected];
+      });
       return { ok: true as const, deviceId };
     } catch (err) {
       return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
@@ -316,8 +323,9 @@ async function start(): Promise<void> {
     // A changed theme takes effect immediately — native chrome and renderer CSS alike.
     applyTheme(next.theme);
     // Apply changed hotkey combos to the running daemon without a restart, and relabel the tray
-    // menu's action items so they show the new combo too.
-    daemon?.reloadHotkeys();
+    // menu's action items so they show the new combo too. Awaited so a reload failure surfaces
+    // through the invoke instead of becoming an unhandled rejection.
+    await daemon?.reloadHotkeys();
     refreshTrayMenu(next.wakeHotkey, next.offHotkey);
     return { ok: true as const };
   });

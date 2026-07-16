@@ -7,14 +7,20 @@ export function SegmentedControl<T extends string>({
   options,
   onChange,
   ariaLabel,
+  className,
 }: {
   value: T;
   options: readonly { value: T; label: ReactNode }[];
   onChange: (value: T) => void;
   ariaLabel?: string;
+  className?: string;
 }) {
   return (
-    <div className="segmented" role="radiogroup" aria-label={ariaLabel}>
+    <div
+      className={className ? `segmented ${className}` : "segmented"}
+      role="radiogroup"
+      aria-label={ariaLabel}
+    >
       {options.map((o) => (
         <button
           key={o.value}

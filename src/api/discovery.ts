@@ -55,10 +55,21 @@ export async function discoverTVs(timeoutMs = 3000): Promise<DiscoveredTV[]> {
     const socket = createSocket({ type: "udp4", reuseAddr: true });
     const found = new Map<string, DiscoveredTV>();
 
-    socket.on("error", (err) => {
+    // Settle exactly once: several failure paths can race (a send callback error per target, the
+    // socket 'error' event, the collection timeout), and closing an already-closed dgram socket
+    // throws — inside the timer callback that would be an uncaught exception in the main process.
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       socket.close();
-      reject(err);
-    });
+      fn();
+    };
+
+    const timer = setTimeout(() => finish(() => resolve([...found.values()])), timeoutMs);
+
+    socket.on("error", (err) => finish(() => reject(err)));
 
     socket.on("message", (msg, rinfo) => {
       const text = msg.toString();
@@ -76,18 +87,10 @@ export async function discoverTVs(timeoutMs = 3000): Promise<DiscoveredTV[]> {
       for (const target of SEARCH_TARGETS) {
         const packet = mSearch(target);
         socket.send(packet, SSDP_PORT, SSDP_ADDR, (err) => {
-          if (err) {
-            socket.close();
-            reject(err);
-          }
+          if (err) finish(() => reject(err));
         });
       }
     });
-
-    setTimeout(() => {
-      socket.close();
-      resolve([...found.values()]);
-    }, timeoutMs);
   });
 }
 

@@ -1,26 +1,42 @@
-/* Universal header — one component (AppHeader), one style, used by the main screen and
-   Settings: a title (with optional subtitle), then the status pill / buttons pushed right. */
+/* Glass header — fixed over the content so scrolling views blur through it (the window itself
+   stays opaque; the "glass" is backdrop-filter over our own content). */
 .app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-height);
+  z-index: 1; /* above the OverlayScrollbars hosts; toasts sit at 2 */
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  background: var(--bg);
+  padding: 0 14px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(1.8);
+  backdrop-filter: blur(20px) saturate(1.8);
   border-bottom: 1px solid var(--border);
-  flex: none;
+  user-select: none;
 
   .title {
     font-weight: 600;
-    font-size: 16px;
+    font-size: 13px;
+    color: var(--muted);
     margin: 0;
     margin-right: auto;
+  }
 
-    small {
-      color: var(--muted);
-      font-weight: 400;
-      font-size: 13px;
-      margin-left: 8px;
-    }
+  /* Absolutely centered so the tabs stay put no matter how wide the side regions are. */
+  .header-tabs {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
+    min-width: 32px; /* reserve the slot so tabs/title don't shift when actions appear */
+    justify-content: flex-end;
   }
 
   /* Keep every button on one line — never shrink or wrap its label. */
@@ -36,5 +52,17 @@
 
     &:hover { background: var(--btn-hover); }
     &[aria-pressed="true"] { background: var(--btn-hover); }
+  }
+}
+
+/* macOS (hiddenInset title bar): clear the traffic lights and let the header drag the window.
+   Interactive children opt back out or their clicks would start a drag. */
+body.is-mac .app-header {
+  padding-left: 84px;
+  -webkit-app-region: drag;
+
+  .segmented,
+  button {
+    -webkit-app-region: no-drag;
   }
 }

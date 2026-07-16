@@ -36,6 +36,26 @@ export async function saveConfig(config: TVConfig): Promise<void> {
   await writeFile(configPath(), JSON.stringify(config, null, 2) + "\n", "utf8");
 }
 
+// All config mutations go through here. Several writers run concurrently in the Electron app —
+// the Settings autosave, the OAuth token refresh inside any TV action, and the pairing IPC — and
+// each is a load→modify→save of the whole file, so unserialized they silently drop each other's
+// changes (worst case: a token refresh persists its pre-edit copy, or an autosave clobbers a
+// freshly rotated refresh token and every later refresh fails with invalid_grant). A single
+// promise chain makes each read-modify-write atomic relative to the others.
+let writeLock: Promise<unknown> = Promise.resolve();
+
+export function updateConfig(mutate: (config: TVConfig) => TVConfig | void): Promise<TVConfig> {
+  const run = writeLock.then(async () => {
+    const config = await loadConfig();
+    const next = mutate(config) ?? config;
+    await saveConfig(next);
+    return next;
+  });
+  // Keep the chain usable after a failed write; the failure still rejects `run` for its caller.
+  writeLock = run.catch(() => undefined);
+  return run;
+}
+
 export async function resetConfig(): Promise<void> {
   try {
     await unlink(configPath());
@@ -48,15 +68,13 @@ export async function resetConfig(): Promise<void> {
 // redirectUri (and all preferences), then rewrite the file. If no config file exists yet there
 // is nothing signed in, so this is a no-op rather than writing a defaults-only file.
 export async function signOut(): Promise<void> {
-  let raw: string;
   try {
-    raw = await readFile(configPath(), "utf8");
+    await readFile(configPath(), "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
     throw err;
   }
-  const config = mergeConfig(JSON.parse(raw) as Partial<TVConfig> & { secret?: string });
-  await saveConfig(clearTokens(config));
+  await updateConfig((config) => clearTokens(config));
 }
 
 // Token from the environment takes precedence over the config file.

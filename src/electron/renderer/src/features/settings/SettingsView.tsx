@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { AppSettings, AuthStatus } from "../../types";
-import { AppHeader } from "../../components/AppHeader";
 import { Button } from "../../components/Button";
 import { DangerZone } from "../../components/DangerZone";
 import { Disclosure } from "../../components/Disclosure";
@@ -9,7 +8,6 @@ import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
 import { HintPills, type Hint } from "../../components/HintPills";
 import { HotkeyField } from "../../components/HotkeyField";
-import { Overlay } from "../../components/Overlay";
 import { ScrollArea } from "../../components/ScrollArea";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { SettingsGroup } from "../../components/SettingsGroup";
@@ -19,7 +17,7 @@ import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import { DeviceList } from "./DeviceList";
 import { OAuthClientFields } from "./OAuthClientFields";
-import "./SettingsOverlay.scss";
+import "./SettingsView.scss";
 
 const PC_INPUT_HINTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"] as const;
 // The per-TV field additionally offers "Shared", which clears the override (empty string) so the
@@ -32,6 +30,65 @@ const THEME_OPTIONS = [
   { value: "system", label: "System" },
 ] as const;
 
+// The LAN host/MAC inputs plus the Discover/Pair action row, shared by the "Add a TV" tab and an
+// existing (non-cloud) TV's tab — identical fields, different id prefix and pair-status display.
+function LanPairFields({
+  idPrefix,
+  host,
+  mac,
+  onHost,
+  onMac,
+  discovering,
+  pairing,
+  onDiscover,
+  onPair,
+  paired,
+}: {
+  idPrefix: string;
+  host: string;
+  mac: string;
+  onHost: (v: string) => void;
+  onMac: (v: string) => void;
+  discovering: boolean;
+  pairing: boolean;
+  onDiscover: () => void;
+  onPair: () => void;
+  // null hides the status line (the Add tab has no pair state of its own yet).
+  paired: boolean | null;
+}) {
+  return (
+    <>
+      <Field label="TV IP / host" htmlFor={`${idPrefix}Host`}>
+        <TextInput
+          id={`${idPrefix}Host`}
+          placeholder="e.g. 192.168.1.42"
+          value={host}
+          onValueChange={onHost}
+        />
+      </Field>
+      <Field label="MAC address (for Wake-on-LAN)" htmlFor={`${idPrefix}Mac`}>
+        <TextInput
+          id={`${idPrefix}Mac`}
+          placeholder="e.g. a0:b1:c2:d3:e4:f5"
+          value={mac}
+          onValueChange={onMac}
+        />
+      </Field>
+      <div className="pair-row">
+        <Button onClick={onDiscover} disabled={discovering}>
+          {discovering ? "Searching…" : "Discover"}
+        </Button>
+        <Button onClick={onPair} disabled={pairing}>
+          {pairing ? "Waiting for TV…" : paired ? "Re-pair" : "Pair"}
+        </Button>
+        {paired !== null && (
+          <span className="pair-status">{paired ? "Paired ✓" : "Not paired"}</span>
+        )}
+      </div>
+    </>
+  );
+}
+
 // The "Add a TV" tab edits a scratch deviceConfigs entry under this key; it must never be
 // persisted as a real device (pairing creates the real local:<mac> entry instead).
 const ADD_TAB = "__add__";
@@ -41,20 +98,18 @@ function stripAddScratch<T>(configs: Record<string, T>): Record<string, T> {
   return rest;
 }
 
-// The whole Settings screen. Mounted only while open — every open gets fresh state: the draft
-// re-seeded from initialSettings, the device list reloaded, Account's additional options
-// re-collapsed. There is no Save button: every change autosaves (see useSettingsForm).
-export function SettingsOverlay({
+// The whole Settings tab. Mounted only while the tab is active — every visit gets fresh state:
+// the draft re-seeded from initialSettings, the device list reloaded, Account's additional
+// options re-collapsed. There is no Save button: every change autosaves (see useSettingsForm).
+export function SettingsView({
   initialSettings,
   authorized,
-  onClose,
   onAuthChanged,
 }: {
   initialSettings: AppSettings;
   // Initial cloud auth state; fetched fresh by App right before mounting. Signing in from the
   // Experimental group updates it live.
   authorized: boolean;
-  onClose: () => void;
   // Re-fetch auth status after a sign-in/out or a client change; returns the latest so the caller
   // can react (App keeps the pill it passes back down in step).
   onAuthChanged: () => Promise<AuthStatus>;
@@ -224,58 +279,46 @@ export function SettingsOverlay({
     }
   };
 
-  // Local transport: pair with the active TV. Flush the draft first so the just-typed host/mac
-  // are on disk for the main process to read, then trigger the on-screen Allow + token store, then
-  // reload settings so the "Paired" indicator reflects the stored token.
-  const onPair = async () => {
-    await form.flush();
-    const cfg = form.draft.deviceConfigs[activeTvTab];
-    if (!cfg?.host?.trim()) {
-      form.setError("Enter the TV's IP address first.");
-      return;
-    }
-    setPairing(true);
-    try {
-      const res = await window.tvAPI.pairTV({
-        deviceId: activeTvTab,
-        host: cfg.host.trim(),
-        mac: cfg.mac?.trim() ?? "",
-      });
-      if (!res.ok) {
-        form.setError(res.error || "Pairing failed.");
-        return;
-      }
-      form.setError(null);
-      setPairedTabs((p) => ({ ...p, [activeTvTab]: true }));
-      reloadDevices();
-    } finally {
-      setPairing(false);
-    }
-  };
-
-  // Local transport: pair a brand-new TV from the "Add a TV" tab. Unlike onPair, this passes no
-  // deviceId, so the main process mints a fresh local:<mac> device, then we clear the scratch
-  // fields, reload the list (the new TV shows as its own tab), and jump to it.
-  const onAddPair = async () => {
-    const scratch = form.draft.deviceConfigs[ADD_TAB];
-    const host = scratch?.host?.trim();
+  // Local transport: pair with the TV whose fields live on `tabId` — an existing TV's tab, or the
+  // "Add a TV" scratch tab (which passes no deviceId, so the main process mints a fresh
+  // local:<mac> entry, pops the on-screen Allow, and stores the token + host/mac).
+  const onPair = async (tabId: string) => {
+    const isAdd = tabId === ADD_TAB;
+    // For an existing tab, flush the draft first so the just-typed host/mac are on disk before
+    // the pairing IPC rewrites that entry.
+    if (!isAdd) await form.flush();
+    const cfg = form.draft.deviceConfigs[tabId];
+    const host = cfg?.host?.trim();
+    const mac = cfg?.mac?.trim() ?? "";
     if (!host) {
-      form.setError("Enter the TV's IP address first, or use Discover.");
+      form.setError(
+        isAdd ? "Enter the TV's IP address first, or use Discover." : "Enter the TV's IP address first.",
+      );
       return;
     }
     setPairing(true);
     try {
-      const res = await window.tvAPI.pairTV({ host, mac: scratch?.mac?.trim() ?? "" });
+      const res = await window.tvAPI.pairTV(isAdd ? { host, mac } : { deviceId: tabId, host, mac });
       if (!res.ok) {
         form.setError(res.error || "Pairing failed.");
         return;
       }
       form.setError(null);
-      // Clear the scratch entry so it prunes on the next save and the fields reset for next time.
-      form.setDeviceConfig(ADD_TAB, "host", "");
-      form.setDeviceConfig(ADD_TAB, "mac", "");
-      setPairedTabs((p) => ({ ...p, [res.deviceId]: true }));
-      setTvTab(res.deviceId);
+      if (isAdd) {
+        // Seed the draft with the entry the pairing IPC just wrote and mirror its auto-select.
+        // The autosave persists deviceConfigs as a whole-map replace built from the draft — if
+        // the draft never learns about the fresh entry, the very next save (triggered right
+        // below by clearing the scratch fields) would wipe the TV that was just paired.
+        form.setDeviceConfig(res.deviceId, "host", host);
+        if (mac) form.setDeviceConfig(res.deviceId, "mac", mac);
+        form.toggleDevice(res.deviceId, true);
+        // Clear the scratch entry so it prunes on the next save and the fields reset for next
+        // time, then jump to the new TV's own tab.
+        form.setDeviceConfig(ADD_TAB, "host", "");
+        form.setDeviceConfig(ADD_TAB, "mac", "");
+        setTvTab(res.deviceId);
+      }
+      setPairedTabs((p) => ({ ...p, [isAdd ? res.deviceId : tabId]: true }));
       reloadDevices();
     } finally {
       setPairing(false);
@@ -321,13 +364,7 @@ export function SettingsOverlay({
   };
 
   return (
-    <Overlay labelledBy="settingsTitle">
-      <AppHeader title="Settings" titleId="settingsTitle">
-        <Button aria-label="Close" onClick={onClose}>
-          Close
-        </Button>
-      </AppHeader>
-      <ScrollArea className="modal">
+    <ScrollArea className="modal">
         {/* The 640px column centering targets .modal-inner > * — OverlayScrollbars owns the
             direct children of .modal, so the groups need their own wrapper. */}
         <div className="modal-inner">
@@ -396,30 +433,18 @@ export function SettingsOverlay({
                   Add a TV on your network. Turn the TV on, Discover it (or enter its address),
                   then Pair and accept the on-screen prompt. It'll then get its own tab above.
                 </p>
-                <Field label="TV IP / host" htmlFor="addHost">
-                  <TextInput
-                    id="addHost"
-                    placeholder="e.g. 192.168.1.42"
-                    value={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
-                    onValueChange={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
-                  />
-                </Field>
-                <Field label="MAC address (for Wake-on-LAN)" htmlFor="addMac">
-                  <TextInput
-                    id="addMac"
-                    placeholder="e.g. a0:b1:c2:d3:e4:f5"
-                    value={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
-                    onValueChange={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
-                  />
-                </Field>
-                <div className="pair-row">
-                  <Button onClick={() => void onDiscover()} disabled={discovering}>
-                    {discovering ? "Searching…" : "Discover"}
-                  </Button>
-                  <Button onClick={() => void onAddPair()} disabled={pairing}>
-                    {pairing ? "Waiting for TV…" : "Pair"}
-                  </Button>
-                </div>
+                <LanPairFields
+                  idPrefix="add"
+                  host={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
+                  mac={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
+                  onHost={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
+                  onMac={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
+                  discovering={discovering}
+                  pairing={pairing}
+                  onDiscover={() => void onDiscover()}
+                  onPair={() => void onPair(ADD_TAB)}
+                  paired={null}
+                />
               </>
             ) : (
               <>
@@ -500,33 +525,18 @@ export function SettingsOverlay({
                       Discover this TV on the network or enter its address, then Pair (turn the TV
                       on and accept the on-screen prompt).
                     </p>
-                    <Field label="TV IP / host" htmlFor="tvHost">
-                      <TextInput
-                        id="tvHost"
-                        placeholder="e.g. 192.168.1.42"
-                        value={activeDeviceConfig?.host ?? ""}
-                        onValueChange={(v) => form.setDeviceConfig(activeTvTab, "host", v)}
-                      />
-                    </Field>
-                    <Field label="MAC address (for Wake-on-LAN)" htmlFor="tvMac">
-                      <TextInput
-                        id="tvMac"
-                        placeholder="e.g. a0:b1:c2:d3:e4:f5"
-                        value={activeDeviceConfig?.mac ?? ""}
-                        onValueChange={(v) => form.setDeviceConfig(activeTvTab, "mac", v)}
-                      />
-                    </Field>
-                    <div className="pair-row">
-                      <Button onClick={() => void onDiscover()} disabled={discovering}>
-                        {discovering ? "Searching…" : "Discover"}
-                      </Button>
-                      <Button onClick={() => void onPair()} disabled={pairing}>
-                        {pairing ? "Waiting for TV…" : activePaired ? "Re-pair" : "Pair"}
-                      </Button>
-                      <span className="pair-status">
-                        {activePaired ? "Paired ✓" : "Not paired"}
-                      </span>
-                    </div>
+                    <LanPairFields
+                      idPrefix="tv"
+                      host={activeDeviceConfig?.host ?? ""}
+                      mac={activeDeviceConfig?.mac ?? ""}
+                      onHost={(v) => form.setDeviceConfig(activeTvTab, "host", v)}
+                      onMac={(v) => form.setDeviceConfig(activeTvTab, "mac", v)}
+                      discovering={discovering}
+                      pairing={pairing}
+                      onDiscover={() => void onDiscover()}
+                      onPair={() => void onPair(activeTvTab)}
+                      paired={activePaired}
+                    />
                   </>
                 )}
               </>
@@ -579,7 +589,6 @@ export function SettingsOverlay({
           <ErrorText>{form.error}</ErrorText>
           {appVersion && <p className="app-version">Version {appVersion}</p>}
         </div>
-      </ScrollArea>
-    </Overlay>
+    </ScrollArea>
   );
 }
