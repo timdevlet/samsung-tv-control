@@ -109,9 +109,13 @@ export async function startDaemon(): Promise<Daemon> {
   // whole operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, on a thrown error — so a
   // network stack that's still reconnecting right after the PC resumes gets several chances.
   // `target`/`accelForLog` scope a per-device hotkey trigger; the public zero-arg calls act on the
-  // Settings selection as before. Note: a binding whose every id is stale (TV removed from the
-  // account) makes app.switch() throw and churn this retry loop — ~30s of log noise, harmless.
-  async function triggerOn(target?: HotkeyTarget, accelForLog?: string): Promise<ActionResult> {
+  // Settings selection as before. `auto` marks the daemon's own triggers (wake-on-resume, boot
+  // reconcile) — app.switch then leaves a LAN TV whose input can't be read alone instead of
+  // sending blind input keys (see SwitchOptions in src/app.ts); every user-initiated caller
+  // (hotkey, tray, renderer button) stays manual. Note: a binding whose every id is stale (TV
+  // removed from the account) makes app.switch() throw and churn this retry loop — ~30s of log
+  // noise, harmless.
+  async function triggerOn(target?: HotkeyTarget, accelForLog?: string, auto = false): Promise<ActionResult> {
     const label = hotkeyLabel(accelForLog ?? wakeAccel, PLATFORM);
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
@@ -121,7 +125,7 @@ export async function startDaemon(): Promise<Daemon> {
     log(`\n${label} → waking TV and switching to PC...${scopeTag(ids)}`);
     try {
       const acted = await withRetry(
-        () => app.switch(undefined, ids),
+        () => app.switch(undefined, ids, { auto }),
         WAKE_ATTEMPTS,
         WAKE_RETRY_MS,
         sleep,
@@ -236,7 +240,7 @@ export async function startDaemon(): Promise<Daemon> {
   // system boot (not process start), cross-platform.
   if (isWithinBootWindow(uptimeSeconds())) {
     log("\nDaemon started near boot → waking TV if it was off...");
-    void triggerOn();
+    void triggerOn(undefined, undefined, true);
   }
 
   // globalShortcut registrations survive sleep/wake on their own (the OS owns them), so unlike the
@@ -244,7 +248,7 @@ export async function startDaemon(): Promise<Daemon> {
   const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
     log(`\nPC woke from sleep (~${mins} min) → waking TV if it was off...`);
-    void triggerOn();
+    void triggerOn(undefined, undefined, true);
   });
 
   // Log the *active* combos (which may be user-configured); a cleared binding logs as disabled.

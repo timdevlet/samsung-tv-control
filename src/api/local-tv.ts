@@ -14,8 +14,10 @@
 //
 // Honest limitations vs the cloud: the local protocol can report power only coarsely (the TV's
 // info endpoint answering ⇒ on) and can't reliably read the current input — getStatus() returns
-// a synthetic input capability so app.ts's switch flow proceeds, and offOne()'s best-effort path
-// (src/app.ts) powers off when the input is unknowable.
+// a synthetic input capability so app.ts's switch flow proceeds. When the input is unknowable,
+// app.ts falls back to best effort: a user-initiated switch sends the input keys blind, an
+// automatic one (wake-on-resume/boot) leaves the input alone, and offOne() powers off assuming
+// the TV is on the PC input (see src/app.ts).
 
 import { createSocket } from "node:dgram";
 import WebSocket from "ws";

@@ -20,12 +20,50 @@ vi.mock("../src/config.js", async (importOriginal) => {
   };
 });
 
+// Fake the `ws` package so LocalTV's remote WebSocket never dials a real TV. Each construction
+// records itself in `wsFakes.instances`, accepts the connection on the next microtask (after
+// connectRemote has attached its listeners), and records every key frame sent.
+const wsFakes = vi.hoisted(() => ({
+  instances: [] as { url: string; sent: string[]; closed: boolean }[],
+}));
+
+vi.mock("ws", () => {
+  class FakeWS {
+    sent: string[] = [];
+    closed = false;
+    private listeners: Record<string, ((ev: unknown) => void)[]> = {};
+    constructor(readonly url: string) {
+      wsFakes.instances.push(this);
+      queueMicrotask(() => {
+        for (const fn of this.listeners["message"] ?? []) {
+          fn({ data: JSON.stringify({ event: "ms.channel.connect", data: {} }) });
+        }
+      });
+    }
+    addEventListener(type: string, fn: (ev: unknown) => void): void {
+      (this.listeners[type] ??= []).push(fn);
+    }
+    send(data: string): void {
+      this.sent.push(data);
+    }
+    close(): void {
+      this.closed = true;
+    }
+  }
+  return { default: FakeWS };
+});
+
 import { createApp } from "../src/app.js";
+
+// The remote keys a fake WS received, in order.
+const sentKeys = (ws: { sent: string[] }): string[] =>
+  ws.sent.map((s) => (JSON.parse(s) as { params: { DataOfCmd: string } }).params.DataOfCmd);
 
 beforeEach(() => {
   // No token in the environment — the cloud path would fail; the local path must not need one.
   delete process.env.SMARTTHINGS_TOKEN;
   delete process.env.SMARTTHINGS_MOCK;
+  wsFakes.instances.length = 0;
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -82,7 +120,7 @@ describe("routing transport", () => {
     expect(calledCloud).toBe(false);
   });
 
-  it("leaves the input alone when a LAN TV is already on (blind keys would cycle it away)", async () => {
+  it("auto trigger leaves an already-on LAN TV's input alone (blind keys would cycle it away)", async () => {
     store = {
       pcInput: "HDMI2",
       selectedDeviceIds: ["local:tv"],
@@ -90,13 +128,49 @@ describe("routing transport", () => {
     };
     const logs: string[] = [];
     const logSpy = vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
-    // The LAN power probe answers → the TV reports "on". Its input is unreadable over LAN, so
-    // switch() must NOT open the remote WebSocket and send source keys (they move relative to the
-    // current input — on the auto-wake path that cycles a TV already on PC away from it). If the
-    // guard regressed, sendKeys would attempt a real wss:// connection here and time out.
+    // The LAN power probe answers → the TV reports "on". Its input is unreadable over LAN, so an
+    // AUTOMATIC switch (wake-on-resume/boot) must NOT open the remote WebSocket and send source
+    // keys — they move relative to the current input, and on the auto-wake path the TV is almost
+    // certainly already on the PC input, so blind keys would cycle it away.
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
-    await expect(createApp().switch()).resolves.toBe(true);
+    await expect(createApp().switch(undefined, undefined, { auto: true })).resolves.toBe(true);
     logSpy.mockRestore();
     expect(logs.some((l) => l.includes("leaving the input unchanged"))).toBe(true);
+    expect(wsFakes.instances).toHaveLength(0);
+  });
+
+  it("manual trigger sends the input keys to an already-on LAN TV (its input can't be read)", async () => {
+    store = {
+      pcInput: "HDMI2",
+      selectedDeviceIds: ["local:tv"],
+      deviceConfigs: { "local:tv": { host: "1.2.3.4", mac: "a0:b1:c2:d3:e4:f5", wsToken: "tok" } },
+    };
+    // TV reports "on" via the LAN probe. A user-initiated switch (hotkey/tray/button — the
+    // default, no `auto`) is an explicit ask to reach the PC input, so the keys must go out even
+    // though the current input is unreadable over LAN.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+    await expect(createApp().switch()).resolves.toBe(true);
+    expect(wsFakes.instances).toHaveLength(1);
+    expect(sentKeys(wsFakes.instances[0])).toEqual(["KEY_HDMI"]);
+    expect(wsFakes.instances[0].closed).toBe(true);
+  });
+
+  it("a manual switch reaches EVERY selected TV, not just one", async () => {
+    // Two LAN TVs, both already on. Each must get its own remote connection and its own keys —
+    // TV b's recorded key sequence, TV a's KEY_HDMI fallback.
+    store = {
+      pcInput: "HDMI2",
+      selectedDeviceIds: ["local:a", "local:b"],
+      deviceConfigs: {
+        "local:a": { host: "1.1.1.1", wsToken: "tok-a" },
+        "local:b": { host: "2.2.2.2", wsToken: "tok-b", inputKeySeq: "KEY_SOURCE,KEY_ENTER" },
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+    await expect(createApp().switch()).resolves.toBe(true);
+    const byHost = new Map(wsFakes.instances.map((w) => [new URL(w.url).hostname, w]));
+    expect([...byHost.keys()].sort()).toEqual(["1.1.1.1", "2.2.2.2"]);
+    expect(sentKeys(byHost.get("1.1.1.1")!)).toEqual(["KEY_HDMI"]);
+    expect(sentKeys(byHost.get("2.2.2.2")!)).toEqual(["KEY_SOURCE", "KEY_ENTER"]);
   });
 });

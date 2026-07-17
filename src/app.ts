@@ -88,12 +88,20 @@ class RoutingTransport implements TVTransport {
   }
 }
 
+// How a switch was initiated. `auto` marks the daemon's automatic triggers (wake-on-resume, boot
+// reconcile) — the only case where a LAN TV whose input can't be read is left alone (blind remote
+// keys would cycle a TV already on the PC input away from it). An explicit user action (hotkey,
+// tray, button, CLI) always sends the input keys.
+export interface SwitchOptions {
+  auto?: boolean;
+}
+
 export interface App {
   login(): Promise<void>;
   // Switch the TV to the PC input, powering it on first if needed. `deviceIds` overrides the
   // Settings selection (used by per-device hotkeys); omitted = all selected TVs.
   // Resolves true when the commands went out, false when no TVs were selected.
-  switch(inputOverride?: string, deviceIds?: string[]): Promise<boolean>;
+  switch(inputOverride?: string, deviceIds?: string[], opts?: SwitchOptions): Promise<boolean>;
   off(deviceIds?: string[]): Promise<boolean>;
   listDevices(): Promise<void>;
   // The TVs on the account (for the Settings selection UI).
@@ -246,8 +254,9 @@ export function createApp(): App {
     log("   Run `npm start` to wake the TV and switch to PC.\n");
   }
 
-  // Switch one TV to its PC input, powering it on first if needed.
-  async function switchOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string): Promise<void> {
+  // Switch one TV to its PC input, powering it on first if needed. `auto` = triggered by the
+  // daemon itself (resume/boot), not an explicit user action — see SwitchOptions.
+  async function switchOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string, auto: boolean): Promise<void> {
     // 1) Check status first; if off, wake it before switching input. We re-read after waking
     // because the off-state status often doesn't include the input-source map.
     let status = await transport.getStatus(deviceId);
@@ -269,14 +278,20 @@ export function createApp(): App {
     }
     // Best-effort input check, mirroring offOne: the LAN transport can't read the current input
     // (no currentInput/sources), and its input "switch" sends remote keys that move RELATIVE to
-    // whatever input is active (KEY_HDMI and recorded sequences cycle). When the TV was already on
-    // — the auto-wake-on-resume and boot-reconcile cases — it's almost certainly still on the PC
-    // input, so sending keys blind would cycle AWAY from it. Skip instead. A TV we just woke gets
-    // the keys as before (it needs them to land on the PC input).
+    // whatever input is active (KEY_HDMI and recorded sequences cycle). Whether to send them
+    // blind to a TV that was already on depends on who asked:
+    //   • an AUTOMATIC trigger (wake-on-resume, boot reconcile) — the TV is almost certainly
+    //     still on the PC input, so blind keys would cycle AWAY from it. Skip.
+    //   • an explicit user action (hotkey, tray, button, CLI) — the user is asking for the
+    //     switch precisely because the TV may be on another input. Send the keys.
+    // A TV we just woke always gets the keys (it needs them to land on the PC input).
     const inputKnown = Boolean(status.currentInput) || status.sources.length > 0;
     if (!inputKnown && wasOn) {
-      log(`${tag}TV was already on and its input can't be read over this connection — leaving the input unchanged.`);
-      return;
+      if (auto) {
+        log(`${tag}TV was already on and its input can't be read over this connection — leaving the input unchanged.`);
+        return;
+      }
+      log(`${tag}The current input can't be read over this connection — sending the input keys anyway.`);
     }
 
     const target = pickInput(status, pcInput);
@@ -291,14 +306,20 @@ export function createApp(): App {
   }
 
   // Switch every targeted TV to its PC input, powering each on first if needed.
-  async function switchInput(inputOverride?: string, deviceIds?: string[]): Promise<boolean> {
+  async function switchInput(inputOverride?: string, deviceIds?: string[], opts?: SwitchOptions): Promise<boolean> {
     const { config, transport } = await connect(inputOverride);
     const ids = deviceIds ?? resolveDeviceIds(config);
     return forEachSelected(
       config,
       transport,
       (deviceId) =>
-        switchOne(transport, deviceId, inputFor(config, deviceId, inputOverride), deviceTag(config, deviceId, ids)),
+        switchOne(
+          transport,
+          deviceId,
+          inputFor(config, deviceId, inputOverride),
+          deviceTag(config, deviceId, ids),
+          opts?.auto ?? false,
+        ),
       deviceIds,
     );
   }
