@@ -70,13 +70,20 @@
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
-      "shortcutName": "Samsung TV Control"
+      "shortcutName": "Samsung TV Control",
+      "artifactName": "${productName} Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}.${ext}"
     },
     "mac": {
       "target": [
         "dmg"
       ],
       "icon": "build/icon.png"
+    },
+    "dmg": {
+      "artifactName": "${productName}.${ext}"
     },
     "linux": {
       "target": [

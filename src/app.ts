@@ -327,7 +327,8 @@ export function createApp(): App {
       log(`${tag}Can't read the current input over this connection — assuming PC and turning off.`);
     }
 
-    log(`${tag}PC is sleeping and TV is on PC input — turning the TV off...`);
+    // Neutral wording: this runs both from "TV off + sleep this PC" and the sleep-free TV off.
+    log(`${tag}TV is on PC input — turning the TV off...`);
     await transport.powerOff(deviceId);
     log(`${tag}Done — TV turned off.`);
   }
