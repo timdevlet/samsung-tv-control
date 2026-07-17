@@ -75,15 +75,23 @@ export type CaptureResult =
   | { kind: "invalid"; reason: string } // bare key — needs a modifier
   | { kind: "accelerator"; accelerator: string };
 
-export function captureFromEvent(e: KeyLike): CaptureResult {
-  if (e.key === "Escape") return { kind: "cancel" };
-  const key = acceleratorKeyFromCode(e.code);
-  if (!key) return { kind: "pending" };
+// The accelerator tokens for the modifiers held in an event, in stored (not display) order.
+export function modifiersFromEvent(
+  e: Pick<KeyLike, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">,
+): string[] {
   const mods: string[] = [];
   if (e.metaKey) mods.push("Command");
   if (e.ctrlKey) mods.push("Control");
   if (e.altKey) mods.push("Alt");
   if (e.shiftKey) mods.push("Shift");
+  return mods;
+}
+
+export function captureFromEvent(e: KeyLike): CaptureResult {
+  if (e.key === "Escape") return { kind: "cancel" };
+  const key = acceleratorKeyFromCode(e.code);
+  if (!key) return { kind: "pending" };
+  const mods = modifiersFromEvent(e);
   if (mods.length === 0) {
     return { kind: "invalid", reason: "Hotkey needs at least one modifier (⌘/Ctrl/Alt/Shift)." };
   }

@@ -1,11 +1,15 @@
 import { useHotkeyCapture } from "../hooks/useHotkeyCapture";
+import { acceleratorParts } from "../lib/accelerator";
 import { IconButton, XIcon } from "./IconButton";
 import "./HotkeyField.scss";
 
-// Accelerator capture widget: click the readonly input to listen, press a combo, and it's stored
-// as an Electron accelerator string (e.g. "Command+Control+E"). The field always shows the
-// active combo (Settings fills in the platform default when none was configured); × clears it,
-// and an empty field means the command is disabled.
+const IS_MAC = /Mac|iP/.test(navigator.platform);
+
+// Accelerator capture widget: click the field to listen, press a combo, and it's stored as an
+// Electron accelerator string (e.g. "Command+Control+E"). The combo is displayed as keycap chips
+// (⌃ ⌥ ⇧ ⌘ + key on mac, Ctrl/Alt/Shift/Win text elsewhere); while capturing, the held modifiers
+// show up live. The field always shows the active combo (Settings fills in the platform default
+// when none was configured); × clears it, and an empty field means the command is disabled.
 export function HotkeyField({
   value,
   onChange,
@@ -28,20 +32,41 @@ export function HotkeyField({
     onInvalid: onValidationError,
   });
 
+  const caps = (parts: { token: string; label: string; kind: string }[]) =>
+    parts.map((p) => (
+      <kbd key={p.token} className={`hotkey-cap hotkey-cap-${p.kind}`}>
+        {p.label}
+      </kbd>
+    ));
+
+  const content = capture.capturing ? (
+    capture.heldMods.length > 0 ? (
+      <>
+        {caps(acceleratorParts(capture.heldMods.join("+"), IS_MAC))}
+        <kbd className="hotkey-cap hotkey-cap-pending">…</kbd>
+      </>
+    ) : (
+      <span className="hotkey-placeholder">Press a combo…</span>
+    )
+  ) : value ? (
+    caps(acceleratorParts(value, IS_MAC))
+  ) : (
+    <span className="hotkey-placeholder">
+      {placeholder ?? "Disabled — click, then press a combo"}
+    </span>
+  );
+
   return (
     <div className={capture.capturing ? "hotkey capturing" : "hotkey"}>
-      <input
-        className="hotkey-input"
-        type="text"
-        readOnly
-        value={value}
-        placeholder={
-          capture.capturing
-            ? "Press a combo…"
-            : placeholder ?? "Disabled — click, then press a combo"
-        }
+      <button
+        type="button"
+        className="hotkey-display"
+        title={value || undefined}
+        aria-label={value ? `Hotkey: ${value}` : "Set hotkey"}
         onClick={capture.start}
-      />
+      >
+        {content}
+      </button>
       <IconButton
         className="hotkey-clear"
         title="Clear (disables this command)"

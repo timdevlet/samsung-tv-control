@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   acceleratorKeyFromCode,
+  acceleratorParts,
   captureFromEvent,
+  modifiersFromEvent,
 } from "../src/electron/renderer/src/lib/accelerator.js";
 
 const event = (over: Partial<Parameters<typeof captureFromEvent>[0]>) => ({
@@ -60,5 +62,46 @@ describe("captureFromEvent", () => {
     expect(
       captureFromEvent(event({ key: "Q", code: "KeyQ", shiftKey: true, altKey: true })),
     ).toEqual({ kind: "accelerator", accelerator: "Alt+Shift+Q" });
+  });
+});
+
+describe("modifiersFromEvent", () => {
+  it("lists held modifiers in stored order", () => {
+    expect(modifiersFromEvent(event({ metaKey: true, shiftKey: true }))).toEqual([
+      "Command",
+      "Shift",
+    ]);
+    expect(modifiersFromEvent(event({}))).toEqual([]);
+  });
+});
+
+describe("acceleratorParts", () => {
+  const labels = (accelerator: string, isMac: boolean) =>
+    acceleratorParts(accelerator, isMac).map((p) => p.label);
+
+  it("maps mac modifiers to symbols, reordered to Ctrl,Alt,Shift,Cmd rank", () => {
+    // Stored order is Command-first; display rank puts ⌘ last, like macOS menus.
+    expect(labels("Command+Shift+K", true)).toEqual(["⇧", "⌘", "K"]);
+    expect(labels("Command+Control+E", true)).toEqual(["⌃", "⌘", "E"]);
+  });
+
+  it("uses text names off mac", () => {
+    expect(labels("Control+Alt+P", false)).toEqual(["Ctrl", "Alt", "P"]);
+    expect(labels("Command+Shift+K", false)).toEqual(["Shift", "Win", "K"]);
+  });
+
+  it("compacts named keys to glyphs and passes the rest through", () => {
+    expect(labels("Command+Up", true)).toEqual(["⌘", "↑"]);
+    expect(labels("Control+Return", false)).toEqual(["Ctrl", "↩"]);
+    expect(labels("Alt+F5", true)).toEqual(["⌥", "F5"]);
+    expect(labels("Command+Space", true)).toEqual(["⌘", "Space"]);
+  });
+
+  it("tags parts as mod/key and returns [] for an empty accelerator", () => {
+    expect(acceleratorParts("Command+K", true)).toEqual([
+      { token: "Command", label: "⌘", kind: "mod" },
+      { token: "K", label: "K", kind: "key" },
+    ]);
+    expect(acceleratorParts("", true)).toEqual([]);
   });
 });

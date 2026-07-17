@@ -11,6 +11,14 @@
   padding-bottom: 40px;
 }
 
+/* Reserved like .power-result so the selector appearing after its fetch (or not at all, with
+   fewer than two TVs) never shifts the buttons. */
+.power-tv-slot {
+  min-height: 26px;
+  display: flex;
+  justify-content: center;
+}
+
 .power-buttons {
   display: flex;
   gap: 48px;

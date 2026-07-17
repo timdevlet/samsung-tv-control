@@ -49,13 +49,14 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface Daemon {
   // Wake the TV and switch it to the PC input (with the post-wake retry loop). The result is for
-  // interactive callers (the renderer's power buttons); tray/watcher callers ignore it.
-  triggerOn(): Promise<ActionResult>;
+  // interactive callers (the renderer's power buttons); tray/watcher callers ignore it. An
+  // optional target scopes the action (the Main-screen TV selector); none = the Settings selection.
+  triggerOn(target?: HotkeyTarget): Promise<ActionResult>;
   // Turn the TV off (only if on PC input), then put this PC to sleep. Resolves with the TV-off
   // result before the PC actually sleeps — sleepPc() runs detached (see runOff).
-  triggerOffAndSleep(): Promise<ActionResult>;
+  triggerOffAndSleep(target?: HotkeyTarget): Promise<ActionResult>;
   // Turn the TV off (only if on PC input) and leave this PC running.
-  triggerOff(): Promise<ActionResult>;
+  triggerOff(target?: HotkeyTarget): Promise<ActionResult>;
   // Run one user-defined command (Settings → Commands): its action against its own TV, or every
   // selected TV when the command targets "All TVs".
   triggerCommand(cmd: CommandConfig): Promise<ActionResult>;
@@ -167,13 +168,13 @@ export async function startDaemon(): Promise<Daemon> {
     return result;
   }
 
-  function triggerOffAndSleep(): Promise<ActionResult> {
-    return runOff(true, "TV off + sleep");
+  function triggerOffAndSleep(target?: HotkeyTarget): Promise<ActionResult> {
+    return runOff(true, "TV off + sleep", target);
   }
 
   // TV off without the PC sleep — fired from the tray menu / renderer button.
-  function triggerOff(): Promise<ActionResult> {
-    return runOff(false, "TV off");
+  function triggerOff(target?: HotkeyTarget): Promise<ActionResult> {
+    return runOff(false, "TV off", target);
   }
 
   // Gate-wrapped runner for the simple one-shot commands (power on / input only) — same busy

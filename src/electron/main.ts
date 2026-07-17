@@ -11,7 +11,7 @@ import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } fro
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startDaemon, type Daemon } from "../daemon-core.js";
-import type { ActionResult } from "../domain/daemon.js";
+import type { ActionResult, HotkeyTarget } from "../domain/daemon.js";
 import { createApp } from "../app.js";
 import { onLog, log, logError, type LogEntry } from "../log.js";
 import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
@@ -224,12 +224,25 @@ async function start(): Promise<void> {
   ipcMain.on("log:clear", () => {
     history.length = 0;
   });
-  ipcMain.handle("action:on", (): Promise<ActionResult> | ActionResult =>
-    daemon ? daemon.triggerOn() : { ok: false, error: "Daemon is not running." });
-  ipcMain.handle("action:off", (): Promise<ActionResult> | ActionResult =>
-    daemon ? daemon.triggerOffAndSleep() : { ok: false, error: "Daemon is not running." });
-  ipcMain.handle("action:off-only", (): Promise<ActionResult> | ActionResult =>
-    daemon ? daemon.triggerOff() : { ok: false, error: "Daemon is not running." });
+  // The renderer's power buttons may scope an action to specific TVs (the Main-screen TV
+  // selector). The payload is untrusted IPC — keep only non-empty string ids, deduped; an
+  // empty/absent list means "the Settings selection" (target undefined), as before.
+  const actionTarget = (payload: unknown): HotkeyTarget | undefined => {
+    const ids = Array.isArray(payload)
+      ? [...new Set(
+          payload
+            .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+            .map((v) => v.trim()),
+        )]
+      : [];
+    return ids.length > 0 ? { includeSelected: false, deviceIds: ids } : undefined;
+  };
+  ipcMain.handle("action:on", (_e, deviceIds: unknown): Promise<ActionResult> | ActionResult =>
+    daemon ? daemon.triggerOn(actionTarget(deviceIds)) : { ok: false, error: "Daemon is not running." });
+  ipcMain.handle("action:off", (_e, deviceIds: unknown): Promise<ActionResult> | ActionResult =>
+    daemon ? daemon.triggerOffAndSleep(actionTarget(deviceIds)) : { ok: false, error: "Daemon is not running." });
+  ipcMain.handle("action:off-only", (_e, deviceIds: unknown): Promise<ActionResult> | ActionResult =>
+    daemon ? daemon.triggerOff(actionTarget(deviceIds)) : { ok: false, error: "Daemon is not running." });
   // Run a user-defined command (Settings → Commands). The renderer sends the row as shown —
   // running the on-screen state directly means the Run button works even inside the autosave
   // debounce. Normalized here so a malformed payload can't reach the daemon.

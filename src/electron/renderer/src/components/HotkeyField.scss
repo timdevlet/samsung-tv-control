@@ -1,4 +1,4 @@
-/* Hotkey capture row: a readonly input that shows the combo + a clear button. */
+/* Hotkey capture row: a button showing the combo as keycap chips + a clear button. */
 .hotkey {
   display: flex;
   gap: 6px;
@@ -6,31 +6,58 @@
 
   /* Self-contained input look (matches .field input in Field.scss) so the field renders the
      same whether or not it sits inside a Field wrapper (e.g. a command row). */
-  .hotkey-input {
+  .hotkey-display {
     flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
     cursor: pointer;
-    font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
-    text-align: center;
+    font: inherit;
     color: var(--text);
     background: var(--bg);
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 7px 10px;
+    padding: 6px 10px;
 
-    &::placeholder {
-      color: var(--muted);
-    }
-
-    &:focus {
+    &:focus-visible {
       outline: none;
       border-color: var(--accent);
     }
   }
 
-  /* While listening for a combo, highlight the field and prompt the user. */
-  &.capturing .hotkey-input {
-    border-color: var(--accent);
+  /* One chip per token: small raised keycaps, symbols on mac (⌃ ⌥ ⇧ ⌘), text elsewhere. */
+  .hotkey-cap {
+    font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+    font-size: 0.85em;
+    line-height: 1;
+    padding: 3px 5px;
+    background: var(--btn-bg);
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+
+  /* The "waiting for the real key" chip shown after the held modifiers while capturing. */
+  .hotkey-cap-pending {
     color: var(--muted);
+    border-style: dashed;
+    border-bottom-width: 1px;
+    background: transparent;
+  }
+
+  .hotkey-placeholder {
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* While listening for a combo, highlight the field and prompt the user. */
+  &.capturing .hotkey-display {
+    border-color: var(--accent);
   }
 
   .hotkey-clear { flex: none; }

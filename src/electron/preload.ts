@@ -28,11 +28,13 @@ const tvAPI = {
   // Fetch the backlog accumulated before the window opened.
   getHistory: (): Promise<LogEntry[]> => ipcRenderer.invoke("log:history"),
   clearHistory: (): void => ipcRenderer.send("log:clear"),
-  // Resolves with the action's outcome so the Power screen can show success/error.
-  wakeTv: (): Promise<ActionResult> => ipcRenderer.invoke("action:on"),
-  tvOffSleep: (): Promise<ActionResult> => ipcRenderer.invoke("action:off"),
+  // Resolves with the action's outcome so the Power screen can show success/error. An optional
+  // deviceIds list scopes the action to those TVs (the Main-screen TV selector); omitted/empty
+  // means the TVs selected in Settings.
+  wakeTv: (deviceIds?: string[]): Promise<ActionResult> => ipcRenderer.invoke("action:on", deviceIds),
+  tvOffSleep: (deviceIds?: string[]): Promise<ActionResult> => ipcRenderer.invoke("action:off", deviceIds),
   // TV off without sleeping this PC.
-  tvOff: (): Promise<ActionResult> => ipcRenderer.invoke("action:off-only"),
+  tvOff: (deviceIds?: string[]): Promise<ActionResult> => ipcRenderer.invoke("action:off-only", deviceIds),
   // Run a user-defined command (Settings → Commands) as currently shown in the UI.
   runCommand: (cmd: CommandConfig): Promise<ActionResult> => ipcRenderer.invoke("command:run", cmd),
   // Auth
