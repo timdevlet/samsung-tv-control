@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, CommandSettings, DeviceConfigSettings, ThemePreference } from "../types";
+import type {
+  AppSettings,
+  CommandSettings,
+  DeviceConfigSettings,
+  MainButtons,
+  ThemePreference,
+} from "../types";
 
 export interface SettingsDraft {
   clientId: string;
@@ -11,6 +17,8 @@ export interface SettingsDraft {
   // main process when every field is empty).
   deviceConfigs: Record<string, DeviceConfigSettings>;
   theme: ThemePreference;
+  // Which built-in power buttons the Main screen shows (each defaults to true).
+  mainButtons: MainButtons;
   // User-defined command list, in display order; persisted as a whole-list replace.
   commands: CommandSettings[];
 }
@@ -44,12 +52,17 @@ export function useSettingsForm(
     selectedDeviceIds: new Set(initial.selectedDeviceIds),
     deviceConfigs: initial.deviceConfigs,
     theme: initial.theme,
+    mainButtons: initial.mainButtons,
     commands: initial.commands,
   });
   const [error, setError] = useState<string | null>(null);
 
   const set = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
+
+  // Toggle one built-in Main-screen power button on/off.
+  const setMainButton = (key: keyof MainButtons, shown: boolean) =>
+    setDraft((d) => ({ ...d, mainButtons: { ...d.mainButtons, [key]: shown } }));
 
   const toggleDevice = (deviceId: string, checked: boolean) =>
     setDraft((d) => {
@@ -119,6 +132,7 @@ export function useSettingsForm(
   return {
     draft,
     set,
+    setMainButton,
     toggleDevice,
     setDeviceConfig,
     addCommand,

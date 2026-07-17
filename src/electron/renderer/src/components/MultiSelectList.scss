@@ -1,0 +1,72 @@
+/* The selection body shared by the MultiSelect dropdown panel and the always-visible inline device
+   picker: a "(Select all)" row, a divider, then one labeled row per option (alias/title + optional
+   "Cloud" badge + muted note · label/model · id subtitle). The default puts a checkbox on the left;
+   `.with-toggles` (the inline list) puts a macOS switch on the right instead — the `.multiselect-text`
+   flex:1 already pushes it to the far edge. */
+.multiselect-list {
+  .multiselect-divider {
+    height: 1px;
+    margin: 4px 2px;
+    background: var(--border);
+  }
+
+  .multiselect-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 8px 8px;
+    border-radius: 6px;
+    color: var(--text);
+    cursor: pointer;
+
+    &:hover {
+      background: var(--btn-hover);
+    }
+
+    input[type="checkbox"] {
+      /* Width reset guards against the ambient `.field input { width: 100% }` (this control lives
+         inside a Field), which would otherwise stretch the box and shove the label off-screen. */
+      flex: none;
+      width: auto;
+      margin: 0;
+    }
+
+    .multiselect-text {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .multiselect-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* "Cloud" pill marking a SmartThings-listed TV (LAN TVs get none). */
+    .source-badge {
+      flex: none;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      padding: 1px 7px;
+      line-height: 1.4;
+    }
+
+    .multiselect-subtitle {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
+      word-break: break-all;
+    }
+  }
+
+  .multiselect-all .multiselect-label {
+    font-weight: 600;
+  }
+}

@@ -1,5 +1,5 @@
-/* The Commands group: one card per command — controls row (action | HDMI? | hotkey | ▶ | delete)
-   over the TV-target checkbox row. */
+/* The Commands group: one card per command — a single controls row
+   (TVs | action | HDMI? | hotkey | ▶ | delete). */
 .command-list {
   display: flex;
   flex-direction: column;
@@ -18,26 +18,12 @@
     display: flex;
     align-items: center;
     gap: 8px;
-
-    /* Action select keeps its natural width; the hotkey field absorbs the rest. */
-    select.select {
-      width: auto;
-      flex: 0 0 auto;
-    }
-
-    .command-hdmi {
-      flex: 0 0 auto;
-    }
-
+ 
     /* The hotkey capture field must be allowed to shrink/grow inside the row (the input's
        min-content size would otherwise overflow and clip the clear button). */
     .hotkey {
       flex: 1;
       min-width: 0;
-
-      .hotkey-input {
-        min-width: 0;
-      }
     }
   }
 

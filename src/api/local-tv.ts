@@ -277,9 +277,13 @@ export class LocalTV implements TVTransport {
   }
 }
 
-// Map a resolved input id to the single remote key that best reaches it. HDMI inputs share
-// KEY_HDMI (cycles); anything else falls back to the generic source key. A user who needs a
-// specific HDMI configures inputKeySeq instead.
+// Map a resolved input id to the single remote key that best reaches it. A numbered HDMI input
+// (hdmi2, HDMI3, …) maps to its direct key (KEY_HDMI2, KEY_HDMI3), which jumps straight there on
+// 2016+ Tizen models instead of cycling. Bare "hdmi" (unnumbered) falls back to KEY_HDMI, which
+// cycles; anything non-HDMI falls back to the generic source key. A model that doesn't accept the
+// direct key can still record an explicit inputKeySeq.
 function defaultInputKey(source: string): string {
+  const numbered = /^hdmi\s*(\d+)$/i.exec(source.trim());
+  if (numbered) return `KEY_HDMI${numbered[1]}`;
   return /^hdmi/i.test(source) ? "KEY_HDMI" : "KEY_SOURCE";
 }

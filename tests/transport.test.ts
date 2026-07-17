@@ -151,13 +151,14 @@ describe("routing transport", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
     await expect(createApp().switch()).resolves.toBe(true);
     expect(wsFakes.instances).toHaveLength(1);
-    expect(sentKeys(wsFakes.instances[0])).toEqual(["KEY_HDMI"]);
+    // pcInput "HDMI2" maps to the direct key (jumps straight there) rather than a cycling KEY_HDMI.
+    expect(sentKeys(wsFakes.instances[0])).toEqual(["KEY_HDMI2"]);
     expect(wsFakes.instances[0].closed).toBe(true);
   });
 
   it("a manual switch reaches EVERY selected TV, not just one", async () => {
     // Two LAN TVs, both already on. Each must get its own remote connection and its own keys —
-    // TV b's recorded key sequence, TV a's KEY_HDMI fallback.
+    // TV b's recorded key sequence, TV a's direct-HDMI key (from pcInput "HDMI2").
     store = {
       pcInput: "HDMI2",
       selectedDeviceIds: ["local:a", "local:b"],
@@ -170,7 +171,7 @@ describe("routing transport", () => {
     await expect(createApp().switch()).resolves.toBe(true);
     const byHost = new Map(wsFakes.instances.map((w) => [new URL(w.url).hostname, w]));
     expect([...byHost.keys()].sort()).toEqual(["1.1.1.1", "2.2.2.2"]);
-    expect(sentKeys(byHost.get("1.1.1.1")!)).toEqual(["KEY_HDMI"]);
+    expect(sentKeys(byHost.get("1.1.1.1")!)).toEqual(["KEY_HDMI2"]);
     expect(sentKeys(byHost.get("2.2.2.2")!)).toEqual(["KEY_SOURCE", "KEY_ENTER"]);
   });
 });

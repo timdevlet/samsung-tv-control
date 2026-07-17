@@ -44,6 +44,38 @@ export function PlayIcon() {
   );
 }
 
+// Open eye — the command IS shown on the Main screen (click to unpin).
+export function EyeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+// Eye with a slash — the command is NOT shown on the Main screen (click to pin).
+export function EyeOffIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M6.2 4.1A6.9 6.9 0 0 1 8 3.5c4 0 6.5 4.5 6.5 4.5a12.5 12.5 0 0 1-2 2.5M9.7 9.7a2 2 0 0 1-2.8-2.8M3.5 5.3A12.5 12.5 0 0 0 1.5 8s2.5 4.5 6.5 4.5a6.9 6.9 0 0 0 1.8-.24"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M2.5 2.5l11 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function LogsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -98,6 +130,29 @@ export function PowerOffIcon({ size = 16 }: { size?: number }) {
         strokeLinecap="round"
       />
       <path d="M4.5 4.5l15 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+// Downward chevron, for a dropdown trigger (the MultiSelect). Takes a className so the caller can
+// rotate it when the panel is open.
+export function ChevronDownIcon({ size = 16, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      className={className}
+    >
+      <path
+        d="M6 9l6 6 6-6"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }

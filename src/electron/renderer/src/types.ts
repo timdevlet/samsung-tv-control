@@ -3,5 +3,10 @@
 export type { LogEntry } from "../../../log.js";
 export type { AuthStatus } from "../../auth.js";
 export type { AppSettings, DeviceConfigSettings, CommandSettings } from "../../settings.js";
-export type { CommandAction, ThemePreference } from "../../../domain/config.js";
+export type {
+  CommandAction,
+  MainButtons,
+  MainButtonKey,
+  ThemePreference,
+} from "../../../domain/config.js";
 export type { STDevice } from "../../../domain/tv.js";

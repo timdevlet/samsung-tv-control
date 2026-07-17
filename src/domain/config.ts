@@ -5,6 +5,30 @@ export type ThemePreference = "light" | "dark" | "system";
 
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["light", "dark", "system"];
 
+// The three built-in power buttons on the Main screen, each individually toggleable in Settings.
+// The keys are the PowerAction values the Main screen dispatches.
+export type MainButtonKey = "on" | "off" | "offSleep";
+
+export const MAIN_BUTTON_KEYS: readonly MainButtonKey[] = ["on", "off", "offSleep"];
+
+// Which built-in power buttons the Main screen shows. Each defaults to true so an existing config
+// (no `mainButtons` key) keeps showing all three, exactly as before.
+export type MainButtons = Record<MainButtonKey, boolean>;
+
+// The built-in buttons shown when nothing is configured — all three, the historical Main screen.
+export const DEFAULT_MAIN_BUTTONS: MainButtons = { on: true, off: true, offSleep: true };
+
+// Coerce an untrusted value (config file / IPC payload) to a full MainButtons record: each key is
+// on unless it's explicitly stored as false, so a missing/malformed value shows every button.
+export function normalizeMainButtons(value: unknown): MainButtons {
+  const raw = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
+  return {
+    on: raw.on !== false,
+    off: raw.off !== false,
+    offSleep: raw.offSleep !== false,
+  };
+}
+
 // Sentinel wsToken for a TV that accepts the connection but issues no token — some Samsung models
 // authorize a client by name/IP and never send one on ms.channel.connect. We still need a
 // non-empty marker so the TV persists as paired (empty wsToken = "not paired", and
@@ -107,6 +131,10 @@ export interface TVConfig {
   // App color theme. "system" follows the OS light/dark setting. Unset means dark —
   // the app's historical appearance.
   theme?: ThemePreference;
+
+  // Which of the three built-in power buttons the Main screen shows. Each key defaults to true
+  // (unset = all three shown, the historical Main screen); set a key false to hide that button.
+  mainButtons?: Partial<MainButtons>;
 
   // User-defined command list (Settings → Commands): each entry is an action, an HDMI input for
   // the switch actions, and an optional hotkey. Run from the Settings list or via the hotkey;
@@ -213,6 +241,9 @@ export interface CommandConfig {
   hdmi?: string;
   // Optional global hotkey (Electron accelerator). Unset/empty = run only from the Settings list.
   hotkey?: string;
+  // When true, this command is surfaced as a button on the Main screen (alongside the built-in
+  // power buttons). Unset/false = it lives only in the Settings list. Toggled by the eye icon.
+  pinned?: boolean;
 }
 
 // True when the action switches inputs, so a command needs its HDMI selection.
@@ -273,6 +304,7 @@ export function normalizeCommands(value: unknown): CommandConfig[] {
       cmd.hdmi = (COMMAND_HDMI_INPUTS as readonly string[]).includes(hdmi) ? hdmi : "HDMI1";
     }
     if (typeof entry.hotkey === "string" && entry.hotkey.trim()) cmd.hotkey = entry.hotkey.trim();
+    if (entry.pinned === true) cmd.pinned = true;
     result.push(cmd);
   }
   return result;

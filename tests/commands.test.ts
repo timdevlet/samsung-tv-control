@@ -76,6 +76,24 @@ describe("normalizeCommands", () => {
       { id: "cmd-2", action: "tvOff" },
     ]);
   });
+
+  it("keeps pinned only for a literal true, dropping it otherwise (default = not pinned)", () => {
+    expect(normalizeCommands([{ id: "a", action: "tvOn", pinned: true }])).toEqual([
+      { id: "a", action: "tvOn", pinned: true },
+    ]);
+    // Anything that isn't the boolean true sheds the field — the Main screen shows only pinned:true.
+    expect(
+      normalizeCommands([
+        { id: "a", action: "tvOn", pinned: false },
+        { id: "b", action: "tvOff", pinned: "yes" },
+        { id: "c", action: "tvOff" },
+      ]),
+    ).toEqual([
+      { id: "a", action: "tvOn" },
+      { id: "b", action: "tvOff" },
+      { id: "c", action: "tvOff" },
+    ]);
+  });
 });
 
 describe("commandUsesHdmi", () => {

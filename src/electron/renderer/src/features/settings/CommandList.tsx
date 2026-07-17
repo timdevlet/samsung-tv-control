@@ -3,9 +3,9 @@ import type { CommandAction, CommandSettings } from "../../types";
 import { Button } from "../../components/Button";
 import { HotkeyField } from "../../components/HotkeyField";
 import { IconButton } from "../../components/IconButton";
-import { LabeledCheckbox } from "../../components/LabeledCheckbox";
-import { Select } from "../../components/Select";
-import { PlayIcon, TrashIcon } from "../../components/icons";
+import { MultiSelect, type MultiSelectOption } from "../../components/MultiSelect";
+import { SelectMenu } from "../../components/SelectMenu";
+import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
 import type { ToastKind } from "../../lib/toasts";
 import "./CommandList.scss";
 
@@ -26,14 +26,16 @@ const HDMI_OPTIONS = (["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const).ma
 // importing only types from the node-side modules.
 const usesHdmi = (action: CommandAction) => action === "tvOnHdmi" || action === "switchHdmi";
 
-// The user-defined command list (Settings → Commands): one card per command — a controls row
-// (action) (HDMI, only for the switch actions) (hotkey combination) (▶ run) (delete) over a row
-// of TV checkboxes choosing which TVs it targets (none checked = all enabled TVs).
+// The user-defined command list (Settings → Commands): one card per command — a single controls
+// row (TVs) (action) (HDMI, only for the switch actions) (hotkey combination) (▶ run) (delete).
+// The TVs multiselect chooses which TVs the command targets; an empty selection means "all enabled
+// TVs" and shows as "All TVs".
 // Edits go through the settings draft (autosaved like everything else); Run sends the row as
 // shown, so a command works immediately, even before the autosave lands.
 export function CommandList({
   commands,
   tvOptions,
+  tvLabel,
   onAdd,
   onRemove,
   onChange,
@@ -41,8 +43,11 @@ export function CommandList({
   onToast,
 }: {
   commands: CommandSettings[];
-  // The known TVs, for the target checkboxes.
-  tvOptions: readonly { value: string; label: string }[];
+  // The known TVs, for the target checkboxes — the rich options (alias/title + "Cloud" badge +
+  // note · label/model · id subtitle) shared with the "TVs to control" selector.
+  tvOptions: readonly MultiSelectOption[];
+  // Plain-text name for a TV id, for the Run toast (the option label above is JSX, not a string).
+  tvLabel: (id: string) => string;
   onAdd: (cmd: CommandSettings) => void;
   onRemove: (id: string) => void;
   onChange: (id: string, patch: Partial<CommandSettings>) => void;
@@ -60,7 +65,7 @@ export function CommandList({
       const result = await window.tvAPI.runCommand(cmd);
       const action = ACTION_OPTIONS.find((o) => o.value === cmd.action)?.label ?? cmd.action;
       const tvs = cmd.deviceIds.length
-        ? cmd.deviceIds.map((id) => tvOptions.find((o) => o.value === id)?.label ?? id).join(", ")
+        ? cmd.deviceIds.map((id) => tvLabel(id)).join(", ")
         : "all TVs";
       if (result.ok) onToast("success", `${action} (${tvs}) — done`);
       else onToast("error", result.error || "Command failed");
@@ -77,6 +82,7 @@ export function CommandList({
       deviceIds: [],
       hdmi: "",
       hotkey: "",
+      pinned: false,
     });
 
   const toggleTv = (cmd: CommandSettings, tvId: string, checked: boolean) => {
@@ -96,11 +102,30 @@ export function CommandList({
         // Checked TVs that have since disappeared stay visible (by raw id) so they can be
         // unchecked rather than silently sticking to the command.
         const staleIds = cmd.deviceIds.filter((id) => !tvOptions.some((o) => o.value === id));
+        // Options for the target multiselect: the known TVs (rich options shared with the "TVs to
+        // control" selector), plus any checked-but-vanished ids so they can still be un-targeted
+        // rather than silently sticking to the command.
+        const tvSelectOptions: MultiSelectOption[] = [
+          ...tvOptions,
+          ...staleIds.map((id) => ({ value: id, label: `${id} (gone)` })),
+        ];
+        const selectedSet = new Set(cmd.deviceIds);
         return (
           <div className="command-item" key={cmd.id}>
             <div className="command-main">
-              <Select
-                aria-label="Action"
+              <MultiSelect
+                className="command-tvs-select"
+                ariaLabel="TVs this command targets"
+                noun="TV"
+                emptyMeansAll
+                placeholder="All TVs"
+                options={tvSelectOptions}
+                selected={selectedSet}
+                onChange={(tvId, checked) => toggleTv(cmd, tvId, checked)}
+              />
+              <SelectMenu
+                className="command-action"
+                ariaLabel="Action"
                 value={cmd.action}
                 options={ACTION_OPTIONS}
                 onValueChange={(v) => {
@@ -113,8 +138,8 @@ export function CommandList({
                 }}
               />
               {hdmiEnabled && (
-                <Select
-                  aria-label="HDMI input"
+                <SelectMenu
+                  ariaLabel="HDMI input"
                   className="command-hdmi"
                   value={cmd.hdmi || "HDMI1"}
                   options={HDMI_OPTIONS}
@@ -129,6 +154,19 @@ export function CommandList({
                 onChange={(v) => onChange(cmd.id, { hotkey: v })}
                 onValidationError={onValidationError}
               />
+              <IconButton
+                aria-label={cmd.pinned ? "Hide from main screen" : "Show on main screen"}
+                title={
+                  cmd.pinned
+                    ? "Shown on the Main screen — click to hide"
+                    : "Show this command as a button on the Main screen"
+                }
+                className={cmd.pinned ? "command-pin pinned" : "command-pin"}
+                aria-pressed={cmd.pinned}
+                onClick={() => onChange(cmd.id, { pinned: !cmd.pinned })}
+              >
+                {cmd.pinned ? <EyeIcon /> : <EyeOffIcon />}
+              </IconButton>
               <IconButton
                 aria-label="Run command"
                 title="Run this command now"
@@ -145,24 +183,6 @@ export function CommandList({
               >
                 <TrashIcon />
               </IconButton>
-            </div>
-            <div className="command-tvs">
-              <span className="command-tvs-label">TVs:</span>
-              {tvOptions.map((tv) => (
-                <LabeledCheckbox
-                  key={tv.value}
-                  checked={cmd.deviceIds.includes(tv.value)}
-                  onChange={(checked) => toggleTv(cmd, tv.value, checked)}
-                >
-                  {tv.label}
-                </LabeledCheckbox>
-              ))}
-              {staleIds.map((id) => (
-                <LabeledCheckbox key={id} checked onChange={(c) => toggleTv(cmd, id, c)}>
-                  {id} (gone)
-                </LabeledCheckbox>
-              ))}
-              {cmd.deviceIds.length === 0 && <span className="command-tvs-all">all enabled TVs</span>}
             </div>
           </div>
         );

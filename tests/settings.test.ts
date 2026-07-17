@@ -117,13 +117,13 @@ describe("deviceConfigs in saveSettings", () => {
 describe("commands in getSettings/saveSettings", () => {
   it("exposes stored commands with every field filled", async () => {
     store.commands = [
-      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3" },
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3", pinned: true },
       { id: "b", action: "tvOff" },
     ];
     const settings = await getSettings();
     expect(settings.commands).toEqual([
-      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3" },
-      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", hotkey: "" },
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3", pinned: true },
+      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", hotkey: "", pinned: false },
     ]);
   });
 
@@ -146,6 +146,35 @@ describe("commands in getSettings/saveSettings", () => {
     expect(store.commands).toEqual([{ id: "a", action: "tvOn" }]);
     await saveSettings({ commands: [] });
     expect(store.commands).toEqual([]);
+  });
+});
+
+describe("mainButtons in getSettings/saveSettings", () => {
+  it("defaults to all three shown when unset", async () => {
+    const settings = await getSettings();
+    expect(settings.mainButtons).toEqual({ on: true, off: true, offSleep: true });
+  });
+
+  it("exposes stored values, defaulting missing keys back to shown", async () => {
+    store.mainButtons = { off: false };
+    const settings = await getSettings();
+    expect(settings.mainButtons).toEqual({ on: true, off: false, offSleep: true });
+  });
+
+  it("persists a normalized full record on save", async () => {
+    await saveSettings({ mainButtons: { on: true, off: false, offSleep: false } });
+    expect(store.mainButtons).toEqual({ on: true, off: false, offSleep: false });
+  });
+
+  it("normalizes a malformed payload rather than corrupting the config", async () => {
+    await saveSettings({ mainButtons: { off: false, bogus: 1 } as never });
+    expect(store.mainButtons).toEqual({ on: true, off: false, offSleep: true });
+  });
+
+  it("leaves the stored value untouched when mainButtons is absent", async () => {
+    store.mainButtons = { on: false };
+    await saveSettings({ minimizeToTrayOnClose: false });
+    expect(store.mainButtons).toEqual({ on: false });
   });
 });
 

@@ -67,6 +67,41 @@
   }
 }
 
+/* Pinned commands: a wrapping row of labeled pill buttons under the power buttons. Built on the
+   base <button> look (global.scss); constrained so a long list wraps instead of pushing the
+   window wide. */
+.power-commands {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 420px;
+}
+
+.power-command {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 999px;
+  padding: 6px 14px;
+  color: var(--muted);
+
+  svg { flex: 0 0 auto; }
+
+  &:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  &.pending {
+    color: var(--accent);
+    border-color: var(--accent);
+    opacity: 1;
+
+    svg { animation: power-pulse 1.2s ease-in-out infinite; }
+  }
+}
+
 .power-result {
   min-height: 20px; /* reserved so "Working…" appearing doesn't shift the buttons */
   margin: 0;

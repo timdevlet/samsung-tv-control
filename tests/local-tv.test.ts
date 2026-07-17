@@ -185,6 +185,25 @@ describe("LocalTV", () => {
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI", "KEY_HDMI"]);
   });
 
+  it("setInputSource without a configured sequence sends the direct HDMI key for a numbered input", async () => {
+    const ws = new FakeWS();
+    await new LocalTV(config, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }).setInputSource("local:tv", "local.remoteKey", "HDMI2");
+    // Direct key jumps straight to HDMI2 instead of cycling with a single KEY_HDMI.
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI2"]);
+  });
+
+  it("setInputSource falls back to KEY_SOURCE for a non-HDMI input", async () => {
+    const ws = new FakeWS();
+    await new LocalTV(config, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }).setInputSource("local:tv", "local.remoteKey", "TV");
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_SOURCE"]);
+  });
+
   it("getStatus reports on when the info endpoint answers, off when it doesn't", async () => {
     const localTv = new LocalTV(config);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));

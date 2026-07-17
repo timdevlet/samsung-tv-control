@@ -57,6 +57,8 @@ export function HotkeyField({
   );
 
   return (
+    // The bordered box: a click-to-capture surface plus an inset × clear button on the right edge.
+    // It can't be a <button> (the × would be a nested button), so it's a div holding both controls.
     <div className={capture.capturing ? "hotkey capturing" : "hotkey"}>
       <button
         type="button"
@@ -67,17 +69,19 @@ export function HotkeyField({
       >
         {content}
       </button>
-      <IconButton
-        className="hotkey-clear"
-        title="Clear (disables this command)"
-        aria-label="Clear hotkey"
-        onClick={() => {
-          onChange("");
-          capture.cancel();
-        }}
-      >
-        <XIcon />
-      </IconButton>
+      {value && (
+        <IconButton
+          className="hotkey-clear"
+          title="Clear (disables this command)"
+          aria-label="Clear hotkey"
+          onClick={() => {
+            onChange("");
+            capture.cancel();
+          }}
+        >
+          <XIcon />
+        </IconButton>
+      )}
     </div>
   );
 }

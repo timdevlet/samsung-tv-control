@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { AppSettings, AuthStatus } from "../../types";
+import type { AppSettings, AuthStatus, MainButtonKey, STDevice } from "../../types";
 import { Button } from "../../components/Button";
 import { DangerZone } from "../../components/DangerZone";
 import { Disclosure } from "../../components/Disclosure";
@@ -15,7 +15,8 @@ import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { ToastKind } from "../../lib/toasts";
 import { CommandList } from "./CommandList";
-import { DeviceList } from "./DeviceList";
+import { DeviceMultiSelect } from "./DeviceMultiSelect";
+import { deviceMultiSelectOptions } from "./deviceOptions";
 import { OAuthClientFields } from "./OAuthClientFields";
 import "./SettingsView.scss";
 
@@ -24,6 +25,14 @@ const THEME_OPTIONS = [
   { value: "dark", label: "Dark" },
   { value: "system", label: "System" },
 ] as const;
+
+// The Main-screen power buttons, each toggleable under Behavior. Keys mirror the PowerAction the
+// Main screen dispatches (and the MainButtons record); labels match the buttons' captions there.
+const MAIN_BUTTON_OPTIONS: readonly { key: MainButtonKey; label: string }[] = [
+  { key: "on", label: "Show “Power ON” button" },
+  { key: "off", label: "Show “TV OFF” button" },
+  { key: "offSleep", label: "Show “TV OFF + Sleep PC” button" },
+];
 
 // The LAN host/MAC inputs plus the Discover/Pair action row, shared by the "Add a TV" tab and an
 // existing (non-cloud) TV's tab — identical fields, different id prefix and pair-status display.
@@ -147,6 +156,8 @@ export function SettingsView({
       // scratch entry (the Add-a-TV tab) is never a real device — strip it.
       deviceConfigs: stripAddScratch(draft.deviceConfigs),
       theme: draft.theme,
+      // Which built-in power buttons the Main screen shows.
+      mainButtons: draft.mainButtons,
       // Whole-list replace, like deviceConfigs — an empty list means "all commands deleted".
       commands: draft.commands,
     });
@@ -204,12 +215,33 @@ export function SettingsView({
       ),
     };
   });
-  // Command-target checkboxes: every known TV, labeled like the tabs (alias → live label →
-  // host → id). A command with no TV checked targets all enabled TVs.
-  const tvOptions = tabIds.map((id) => {
+  // Command-target checkboxes: every known TV, rendered with the SAME rich option builder as the
+  // "TVs to control" selector (alias/title + "Cloud" badge + muted note · label/model · id
+  // subtitle) so the two pickers look identical. The union covers cloud-listed and LAN-paired
+  // TVs alike; live label/name/source come from the list when present, else the LAN host stands in
+  // as the label. A command with no TV checked targets all enabled TVs.
+  const listedById =
+    devices.kind === "ready"
+      ? new Map(devices.devices.map((d) => [d.deviceId, d]))
+      : new Map<string, STDevice>();
+  const tvOptions = deviceMultiSelectOptions(
+    tabIds.map((id) => {
+      const listed = listedById.get(id);
+      const host = form.draft.deviceConfigs[id]?.host?.trim() ?? "";
+      return {
+        deviceId: id,
+        label: listed?.label ?? host,
+        name: listed?.name ?? "",
+        source: listed?.source ?? (host ? ("local" as const) : undefined),
+      };
+    }),
+    form.draft.deviceConfigs,
+  );
+  // Plain-text name for a command target, used in the Run toast (the rich option label is JSX).
+  const tvLabel = (id: string) => {
     const cfg = form.draft.deviceConfigs[id];
-    return { value: id, label: cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id };
-  });
+    return cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id;
+  };
   // Per-TV tabs exist only once at least one TV has been paired; until then the bar is just
   // "All TVs" plus the always-present "Add a TV" tab so a first TV can be paired.
   const hasDeviceTabs = deviceTabs.length > 0;
@@ -367,20 +399,24 @@ export function SettingsView({
             </div>
             {activeTvTab === "all" ? (
               <>
+                <p className="hint">
+                  {hasDeviceTabs
+                    ? 'The checked TVs below are what "All TVs" commands and the Main-screen buttons act on. Pick a TV’s tab to rename it or manage its connection.'
+                    : "Add a TV to get started — open the “+ Add a TV” tab, then it’ll appear here to control."}
+                </p>
+                {/* The bulk subset picker: check any set of TVs at once (with "(Select all)"). It
+                    drives selectedDeviceIds, the set "All TVs" commands and the Main-screen buttons
+                    act on. */}
                 {hasDeviceTabs && (
-                  <p className="hint">
-                    The TVs enabled below are what "All TVs" commands and the Main-screen buttons
-                    act on.
-                  </p>
+                  <Field label="TVs to control">
+                    <DeviceMultiSelect
+                      state={devices}
+                      selectedIds={form.draft.selectedDeviceIds}
+                      deviceConfigs={form.draft.deviceConfigs}
+                      onToggle={form.toggleDevice}
+                    />
+                  </Field>
                 )}
-                <Field label="TVs to control">
-                  <DeviceList
-                    state={devices}
-                    selectedIds={form.draft.selectedDeviceIds}
-                    deviceConfigs={form.draft.deviceConfigs}
-                    onToggle={form.toggleDevice}
-                  />
-                </Field>
               </>
             ) : activeTvTab === ADD_TAB ? (
               <>
@@ -467,11 +503,12 @@ export function SettingsView({
             <p className="hint">
               Your own commands: pick an action (and an HDMI input for the switch actions), check
               the TVs it targets (none checked = all enabled TVs), optionally bind a hotkey, then
-              run it with ▶.
+              run it with ▶. Toggle the eye to add it as a button on the Main screen.
             </p>
             <CommandList
               commands={form.draft.commands}
               tvOptions={tvOptions}
+              tvLabel={tvLabel}
               onAdd={form.addCommand}
               onRemove={form.removeCommand}
               onChange={form.setCommand}
@@ -494,6 +531,16 @@ export function SettingsView({
               checked={form.draft.minimizeToTrayOnClose}
               onChange={(v) => form.set("minimizeToTrayOnClose", v)}
             />
+            <p className="hint">Choose which power buttons appear on the Main screen.</p>
+            {MAIN_BUTTON_OPTIONS.map(({ key, label }) => (
+              <SwitchField
+                key={key}
+                id={`mainButton-${key}`}
+                label={label}
+                checked={form.draft.mainButtons[key]}
+                onChange={(v) => form.setMainButton(key, v)}
+              />
+            ))}
           </SettingsGroup>
           <SettingsGroup title="Experimental">
             <p className="hint">

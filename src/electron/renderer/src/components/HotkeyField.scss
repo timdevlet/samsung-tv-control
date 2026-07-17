@@ -1,11 +1,21 @@
-/* Hotkey capture row: a button showing the combo as keycap chips + a clear button. */
+/* Hotkey capture field: the bordered box is the .hotkey container itself, holding a click-to-capture
+   surface plus an inset × clear button on the right edge. (The box can't be a <button> — the × would
+   be a nested button — so the border/background lives on the wrapping div, not on .hotkey-display.) */
 .hotkey {
   display: flex;
-  gap: 6px;
   align-items: stretch;
 
   /* Self-contained input look (matches .field input in Field.scss) so the field renders the
      same whether or not it sits inside a Field wrapper (e.g. a command row). */
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+
+  /* The capture surface — transparent/borderless; the box's look comes from .hotkey above. It just
+     provides the click target and lays the keycap chips out centered. The 8px vertical padding
+     matches the SelectMenu/MultiSelect triggers it sits beside in a command row so the row lines up
+     at the same height. */
   .hotkey-display {
     flex: 1;
     display: flex;
@@ -15,15 +25,14 @@
     min-width: 0;
     cursor: pointer;
     font: inherit;
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
+    color: inherit;
+    background: none;
+    border: none;
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 8px 10px;
 
     &:focus-visible {
       outline: none;
-      border-color: var(--accent);
     }
   }
 
@@ -55,10 +64,17 @@
     white-space: nowrap;
   }
 
-  /* While listening for a combo, highlight the field and prompt the user. */
-  &.capturing .hotkey-display {
-    border-color: var(--accent);
+  /* The × clear button, inset on the right edge of the box. Kept flush to the border with a touch of
+     end padding so it doesn't crowd the corner, and centered vertically by the box's stretch. */
+  .hotkey-clear {
+    flex: none;
+    align-self: center;
+    margin-right: 2px;
   }
 
-  .hotkey-clear { flex: none; }
+  /* Light up the whole box while listening for a combo, or when the capture surface is focused. */
+  &.capturing,
+  &:focus-within {
+    border-color: var(--accent);
+  }
 }

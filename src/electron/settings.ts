@@ -10,9 +10,11 @@ import {
   commandUsesHdmi,
   normalizeCommands,
   normalizeDeviceConfigs,
+  normalizeMainButtons,
   normalizeTheme,
   THEME_PREFERENCES,
   type CommandAction,
+  type MainButtons,
   type ThemePreference,
 } from "../domain/config.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
@@ -33,6 +35,8 @@ export interface AppSettings {
   deviceConfigs: Record<string, DeviceConfigSettings>;
   // App color theme: "light", "dark", or "system" (follow the OS setting).
   theme: ThemePreference;
+  // Which built-in power buttons the Main screen shows (each defaults to true).
+  mainButtons: MainButtons;
   // User-defined command list (Settings → Commands), in stored order.
   commands: CommandSettings[];
 }
@@ -48,6 +52,9 @@ export interface CommandSettings {
   hdmi: string;
   // Electron accelerator; "" = no hotkey (run from the list only).
   hotkey: string;
+  // When true, the command is shown as a button on the Main screen. Always present (defaults to
+  // false) so the eye toggle is a controlled input.
+  pinned: boolean;
 }
 
 export interface DeviceConfigSettings {
@@ -88,12 +95,15 @@ export async function getSettings(): Promise<AppSettings> {
     ),
     // Defaults to dark (the historical appearance) when unset or invalid.
     theme: normalizeTheme(config.theme),
+    // Each button defaults to on when unset — the historical "all three shown" Main screen.
+    mainButtons: normalizeMainButtons(config.mainButtons),
     commands: normalizeCommands(config.commands).map((cmd) => ({
       id: cmd.id,
       action: cmd.action,
       deviceIds: cmd.deviceIds ?? [],
       hdmi: commandUsesHdmi(cmd.action) ? cmd.hdmi ?? "HDMI1" : "",
       hotkey: cmd.hotkey ?? "",
+      pinned: cmd.pinned ?? false,
     })),
   };
 }
@@ -151,6 +161,11 @@ function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
   // Only the three known values are accepted — a malformed IPC payload can't corrupt the config.
   if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {
     config.theme = partial.theme;
+  }
+  // Normalized to a full record (each key on unless explicitly false), so a malformed payload
+  // can't corrupt the config and a missing button key defaults back to shown.
+  if (typeof partial.mainButtons === "object" && partial.mainButtons !== null) {
+    config.mainButtons = normalizeMainButtons(partial.mainButtons);
   }
   // Whole-list replace, like deviceConfigs: the renderer always sends the complete list, and an
   // empty array is meaningful (the user deleted every command). Malformed entries are dropped by

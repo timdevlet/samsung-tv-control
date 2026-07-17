@@ -1,0 +1,77 @@
+/* Subset picker: a counter-only trigger button that opens a floating panel holding the shared
+   MultiSelectList (see MultiSelectList.scss for the option-row styles). Styled to match the app's
+   text inputs / Select (Field.scss) and the device rows it replaces. */
+.multiselect {
+  position: relative;
+
+  .multiselect-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+
+    &:hover:not(:disabled) {
+      background: var(--btn-hover);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .multiselect-value {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chev {
+      flex: none;
+      color: var(--muted);
+      transition: transform 0.15s ease;
+
+      &.open {
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  .multiselect-panel {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    /* By default the panel matches the trigger width (left:0; right:0). A narrow trigger overrides
+       min-width so its option labels don't wrap — see .command-tvs-select. */
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px var(--depth);
+  }
+}
+
+/* The Commands target picker trigger is counter-only ("All TVs" / "3 TVs"), so it doesn't need the
+   full width — cap it and float the checkbox panel wider so the rich option (alias, "Cloud" badge,
+   note · label/model · id subtitle) stays readable on one line. */
+.multiselect.command-tvs-select {
+  flex: none;
+  width: 140px;
+
+  .multiselect-panel {
+    min-width: 320px;
+  }
+}
