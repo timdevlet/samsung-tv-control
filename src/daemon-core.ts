@@ -66,8 +66,10 @@ export interface Daemon {
   // interactive callers (the renderer's power buttons); hotkey/tray/watcher callers ignore it.
   triggerOn(): Promise<ActionResult>;
   // Turn the TV off (only if on PC input), then put this PC to sleep. Resolves with the TV-off
-  // result before the PC actually sleeps — sleepPc() runs detached (see triggerOffAndSleep).
+  // result before the PC actually sleeps — sleepPc() runs detached (see runOff).
   triggerOffAndSleep(): Promise<ActionResult>;
+  // Turn the TV off (only if on PC input) and leave this PC running.
+  triggerOff(): Promise<ActionResult>;
   // Re-read the configured hotkey combos and apply them to the live key matcher. Called after
   // Settings saves so a changed combo takes effect without restarting the daemon.
   reloadHotkeys(): Promise<void>;
@@ -135,28 +137,29 @@ export async function startDaemon(): Promise<Daemon> {
     }
   }
 
-  // Turn the TV off, then immediately put this PC to sleep (Cmd/Ctrl + Q). Like triggerOn, an
-  // optional target scopes a per-device hotkey to its own TVs; the PC sleeps either way.
-  async function triggerOffAndSleep(target?: HotkeyTarget, accelForLog?: string): Promise<ActionResult> {
-    const label = hotkeyLabel(accelForLog ?? offAccel, PLATFORM);
+  // Turn the TV off; when `sleepAfter`, immediately put this PC to sleep as well. Shared by both
+  // off commands — triggerOffAndSleep (Cmd/Ctrl + Q, per-device off hotkeys) and triggerOff (TV
+  // off only). Like triggerOn, an optional target scopes a per-device hotkey to its own TVs.
+  async function runOff(sleepAfter: boolean, label: string, target?: HotkeyTarget): Promise<ActionResult> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
       return { ok: false, error: "A command is already running.", busy: true };
     }
     const ids = await resolveTargetIds(target);
-    log(`\n${label} → turning TV off, then sleeping this PC...${scopeTag(ids)}`);
+    log(`\n${label} → turning TV off${sleepAfter ? ", then sleeping this PC" : " (this PC stays on)"}...${scopeTag(ids)}`);
     let result: ActionResult;
     try {
       const acted = await app.off(ids);
       result = acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
     } catch (e) {
-      logError(`TV off failed: ${e instanceof Error ? e.message : String(e)} — sleeping this PC anyway.`);
+      logError(`TV off failed: ${e instanceof Error ? e.message : String(e)}${sleepAfter ? " — sleeping this PC anyway." : ""}`);
       result = { ok: false, error: e instanceof Error ? e.message : String(e) };
     } finally {
       // Release before suspending: sleepPc()'s child process may not exit (and so not resolve)
       // until the machine resumes, and the resume-time triggerOn must not find the gate busy.
       gate.release(Date.now());
     }
+    if (!sleepAfter) return result;
     // In mock mode only the TV is fake — sleepPc() would suspend the actual dev machine.
     if (isMockMode()) {
       log("Mock mode — skipping PC sleep.");
@@ -169,6 +172,15 @@ export async function startDaemon(): Promise<Daemon> {
       logError(`sleep failed: ${e instanceof Error ? e.message : String(e)}`);
     });
     return result;
+  }
+
+  function triggerOffAndSleep(target?: HotkeyTarget, accelForLog?: string): Promise<ActionResult> {
+    return runOff(true, hotkeyLabel(accelForLog ?? offAccel, PLATFORM), target);
+  }
+
+  // TV off without the PC sleep — fired from the tray menu / renderer button (no hotkey binding).
+  function triggerOff(): Promise<ActionResult> {
+    return runOff(false, "TV off");
   }
 
   // Read the configured combos and update wakeAccel/offAccel/deviceConfigs. A hotkey that was
@@ -265,5 +277,5 @@ export async function startDaemon(): Promise<Daemon> {
     globalShortcut.unregisterAll();
   }
 
-  return { triggerOn, triggerOffAndSleep, reloadHotkeys, stop };
+  return { triggerOn, triggerOffAndSleep, triggerOff, reloadHotkeys, stop };
 }

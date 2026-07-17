@@ -1,7 +1,7 @@
 {
   "name": "samsung-tv-control",
   "version": "0.1.0",
-  "description": "Wake a Samsung TV and switch its input to PC via the SmartThings cloud API.",
+  "description": "Wake a Samsung TV and switch its input to PC over the LAN (Wake-on-LAN + remote WebSocket), with optional SmartThings cloud control.",
   "type": "module",
   "main": "dist-electron/main.cjs",
   "license": "MIT",
@@ -12,6 +12,8 @@
   "scripts": {
     "start": "tsx src/cli.ts",
     "start:mock": "SMARTTHINGS_MOCK=1 tsx src/cli.ts",
+    "off": "tsx src/cli.ts --off",
+    "off:mock": "SMARTTHINGS_MOCK=1 tsx src/cli.ts --off",
     "login": "tsx src/cli.ts --login",
     "devices": "tsx src/cli.ts --devices",
     "devices:mock": "SMARTTHINGS_MOCK=1 tsx src/cli.ts --devices",

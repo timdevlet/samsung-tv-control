@@ -30,6 +30,8 @@ const tvAPI = {
   // Resolves with the action's outcome so the Power screen can show success/error.
   wakeTv: (): Promise<ActionResult> => ipcRenderer.invoke("action:on"),
   tvOffSleep: (): Promise<ActionResult> => ipcRenderer.invoke("action:off"),
+  // TV off without sleeping this PC.
+  tvOff: (): Promise<ActionResult> => ipcRenderer.invoke("action:off-only"),
   // Auth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
   login: (): Promise<AuthResult> => ipcRenderer.invoke("auth:login"),

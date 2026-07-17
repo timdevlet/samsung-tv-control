@@ -57,6 +57,21 @@ export function PowerIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+// Crescent moon, for the OFF + sleep-this-PC action.
+export function MoonIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 // Power symbol with a "\" slash across it, for the OFF action.
 export function PowerOffIcon({ size = 16 }: { size?: number }) {
   return (

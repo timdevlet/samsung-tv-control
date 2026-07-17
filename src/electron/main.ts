@@ -187,6 +187,10 @@ function refreshTrayMenu(wakeHotkey: string, offHotkey: string): void {
       label: `TV off + sleep this PC  (${hotkeyLabel(offHotkey, TRAY_PLATFORM)})`,
       click: () => void daemon?.triggerOffAndSleep(),
     },
+    {
+      label: "TV off (keep this PC on)",
+      click: () => void daemon?.triggerOff(),
+    },
     { type: "separator" },
     { label: "Quit", click: () => { quitting = true; app.quit(); } },
   ]);
@@ -225,6 +229,8 @@ async function start(): Promise<void> {
     daemon ? daemon.triggerOn() : { ok: false, error: "Daemon is not running." });
   ipcMain.handle("action:off", (): Promise<ActionResult> | ActionResult =>
     daemon ? daemon.triggerOffAndSleep() : { ok: false, error: "Daemon is not running." });
+  ipcMain.handle("action:off-only", (): Promise<ActionResult> | ActionResult =>
+    daemon ? daemon.triggerOff() : { ok: false, error: "Daemon is not running." });
 
   // Auth: the GUI equivalent of `npm run login` / `npm run reset`. The daemon reloads config on
   // every action, so newly-saved tokens take effect on the next Wake without a restart.

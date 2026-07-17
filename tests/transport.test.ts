@@ -81,4 +81,22 @@ describe("routing transport", () => {
     );
     expect(calledCloud).toBe(false);
   });
+
+  it("leaves the input alone when a LAN TV is already on (blind keys would cycle it away)", async () => {
+    store = {
+      pcInput: "HDMI2",
+      selectedDeviceIds: ["local:tv"],
+      deviceConfigs: { "local:tv": { host: "1.2.3.4", mac: "a0:b1:c2:d3:e4:f5", wsToken: "tok" } },
+    };
+    const logs: string[] = [];
+    const logSpy = vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+    // The LAN power probe answers → the TV reports "on". Its input is unreadable over LAN, so
+    // switch() must NOT open the remote WebSocket and send source keys (they move relative to the
+    // current input — on the auto-wake path that cycles a TV already on PC away from it). If the
+    // guard regressed, sendKeys would attempt a real wss:// connection here and time out.
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+    await expect(createApp().switch()).resolves.toBe(true);
+    logSpy.mockRestore();
+    expect(logs.some((l) => l.includes("leaving the input unchanged"))).toBe(true);
+  });
 });

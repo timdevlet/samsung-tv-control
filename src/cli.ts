@@ -1,5 +1,6 @@
 // CLI entry point: parse argv and dispatch to the app's handlers.
 //   npm start            → switch the TV to PC (optionally --hdmi 1|2|3|4)
+//   npm run off          → turn the TV off (this PC stays on)
 //   npm run login        → one-time OAuth bootstrap
 //   npm run devices      → list account devices
 //   npm run reset        → clear smartthings-config.json
@@ -19,6 +20,10 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   if (args.includes("--login")) return app.login();
+  if (args.includes("--off")) {
+    await app.off();
+    return;
+  }
   if (args.includes("--devices")) return app.listDevices();
   if (args.includes("--reset")) {
     await resetConfig();
