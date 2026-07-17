@@ -1,5 +1,5 @@
 // Main-process helper for the in-window Settings panel: the GUI equivalent of hand-editing
-// smartthings-config.json. It reads/writes the user-facing preferences (pcInput and the
+// smartthings-config.json. It reads/writes the user-facing preferences (the command list and the
 // close-to-tray behavior) plus the SmartThings OAuth client fields (clientId/clientSecret/
 // redirectUri) — everything you configure once. The OAuth *tokens* stay managed by auth.ts.
 // config.ts does the actual persistence, so this writes the same smartthings-config.json the
@@ -7,17 +7,15 @@
 
 import { loadConfig, updateConfig, type TVConfig } from "../config.js";
 import {
+  commandUsesHdmi,
+  normalizeCommands,
   normalizeDeviceConfigs,
   normalizeTheme,
   THEME_PREFERENCES,
+  type CommandAction,
   type ThemePreference,
 } from "../domain/config.js";
-import { defaultHotkeys } from "../domain/daemon.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
-
-// The combos the daemon uses when a hotkey was never configured — shown in Settings so the
-// active binding is always visible, never hidden behind an empty field.
-const HOTKEY_DEFAULTS = defaultHotkeys(process.platform === "darwin" ? "mac" : "other");
 
 export interface AppSettings {
   // OAuth client id from your SmartThings OAuth-In app.
@@ -26,32 +24,35 @@ export interface AppSettings {
   clientSecret: string;
   // Redirect URI registered on the OAuth client.
   redirectUri: string;
-  // Target input the PC is on (matched by id like "HDMI3" or label like "PC").
-  pcInput: string;
   // When true, closing the window hides to the tray; when false, it quits the app.
   minimizeToTrayOnClose: boolean;
-  // Global hotkey for "Wake TV → PC" as an Electron accelerator ("Command+Control+E").
-  // Always the *active* combo: the platform default is filled in when the config never set one.
-  // Empty string means the command is disabled (no hotkey bound).
-  wakeHotkey: string;
-  // Global hotkey for "TV Off & Sleep". Same semantics as wakeHotkey.
-  offHotkey: string;
-  // Device ids of the TVs commands target, chosen from the account's TV list. Empty = none.
+  // Device ids of the TVs "All TVs" commands (and the Main-screen buttons) target, chosen from
+  // the account's TV list. Empty = none.
   selectedDeviceIds: string[];
-  // Per-TV settings keyed by deviceId: alias/description, an input override (empty = shared
-  // pcInput), and hotkeys firing the action for only that TV (independent of selectedDeviceIds;
-  // "" = unbound, same convention as wakeHotkey/offHotkey).
+  // Per-TV settings keyed by deviceId: alias/description and the LAN fields.
   deviceConfigs: Record<string, DeviceConfigSettings>;
   // App color theme: "light", "dark", or "system" (follow the OS setting).
   theme: ThemePreference;
+  // User-defined command list (Settings → Commands), in stored order.
+  commands: CommandSettings[];
+}
+
+// One command row as the renderer edits it: like CommandConfig but with every field filled
+// ("" / [] = unset) so the form inputs are always controlled.
+export interface CommandSettings {
+  id: string;
+  action: CommandAction;
+  // The TVs this command targets (checkboxes); [] = every TV selected in Settings.
+  deviceIds: string[];
+  // "" for actions that don't switch inputs; "HDMI1".."HDMI5" otherwise.
+  hdmi: string;
+  // Electron accelerator; "" = no hotkey (run from the list only).
+  hotkey: string;
 }
 
 export interface DeviceConfigSettings {
   alias: string;
   description: string;
-  pcInput: string;
-  wakeHotkey: string;
-  offHotkey: string;
   // Local (LAN) transport fields — set for LAN-paired TVs; cloud TVs leave them empty.
   host: string;
   mac: string;
@@ -68,12 +69,8 @@ export async function getSettings(): Promise<AppSettings> {
     clientId: config.clientId ?? "",
     clientSecret: config.clientSecret ?? "",
     redirectUri: config.redirectUri ?? DEFAULT_REDIRECT_URI,
-    pcInput: config.pcInput,
     // Default to the historical behavior (hide to tray) when unset.
     minimizeToTrayOnClose: config.minimizeToTrayOnClose ?? true,
-    // Unset = the platform default is active — show it; an explicit "" = disabled, stays empty.
-    wakeHotkey: (config.wakeHotkey ?? HOTKEY_DEFAULTS.wake).trim(),
-    offHotkey: (config.offHotkey ?? HOTKEY_DEFAULTS.off).trim(),
     selectedDeviceIds: config.selectedDeviceIds ?? [],
     deviceConfigs: Object.fromEntries(
       Object.entries(normalizeDeviceConfigs(config.deviceConfigs)).map(([id, cfg]) => [
@@ -81,9 +78,6 @@ export async function getSettings(): Promise<AppSettings> {
         {
           alias: cfg.alias ?? "",
           description: cfg.description ?? "",
-          pcInput: cfg.pcInput ?? "",
-          wakeHotkey: cfg.wakeHotkey ?? "",
-          offHotkey: cfg.offHotkey ?? "",
           host: cfg.host ?? "",
           mac: cfg.mac ?? "",
           inputKeySeq: cfg.inputKeySeq ?? "",
@@ -94,6 +88,13 @@ export async function getSettings(): Promise<AppSettings> {
     ),
     // Defaults to dark (the historical appearance) when unset or invalid.
     theme: normalizeTheme(config.theme),
+    commands: normalizeCommands(config.commands).map((cmd) => ({
+      id: cmd.id,
+      action: cmd.action,
+      deviceIds: cmd.deviceIds ?? [],
+      hdmi: commandUsesHdmi(cmd.action) ? cmd.hdmi ?? "HDMI1" : "",
+      hotkey: cmd.hotkey ?? "",
+    })),
   };
 }
 
@@ -119,19 +120,8 @@ function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
   if (typeof partial.redirectUri === "string" && partial.redirectUri.trim()) {
     config.redirectUri = partial.redirectUri.trim();
   }
-  if (typeof partial.pcInput === "string" && partial.pcInput.trim()) {
-    config.pcInput = partial.pcInput.trim();
-  }
   if (typeof partial.minimizeToTrayOnClose === "boolean") {
     config.minimizeToTrayOnClose = partial.minimizeToTrayOnClose;
-  }
-  // Hotkeys differ from the fields above: an empty string is meaningful (it clears
-  // the binding), so we apply the value as-is rather than guarding against blanks.
-  if (typeof partial.wakeHotkey === "string") {
-    config.wakeHotkey = partial.wakeHotkey.trim();
-  }
-  if (typeof partial.offHotkey === "string") {
-    config.offHotkey = partial.offHotkey.trim();
   }
   // Unlike the string fields above, an empty array is meaningful (the user unchecked every TV),
   // so persist it whenever an array is supplied rather than guarding against empties.
@@ -142,20 +132,30 @@ function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
   // replacing is what lets clearing all of a TV's fields delete its entry (the sanitizer prunes
   // all-empty entries). A malformed payload normalizes to only its valid entries.
   //
-  // The renderer never sees wsToken (it's a secret set by the pairing IPC), so a naive replace
-  // would wipe every paired TV's token. Carry each token forward from the stored config by
-  // deviceId before normalizing.
+  // The renderer never sees wsToken (it's a secret set by the pairing IPC) and no longer edits
+  // pcInput (the stored per-TV input the automatic wake still switches to), so a naive replace
+  // would wipe both. Carry each forward from the stored config by deviceId before normalizing.
   if (typeof partial.deviceConfigs === "object" && partial.deviceConfigs !== null) {
     const stored = config.deviceConfigs ?? {};
     const merged: Record<string, unknown> = {};
     for (const [id, cfg] of Object.entries(partial.deviceConfigs)) {
-      const token = stored[id]?.wsToken;
-      merged[id] = token ? { ...cfg, wsToken: token } : cfg;
+      const kept = stored[id];
+      merged[id] = {
+        ...cfg,
+        ...(kept?.pcInput ? { pcInput: kept.pcInput } : {}),
+        ...(kept?.wsToken ? { wsToken: kept.wsToken } : {}),
+      };
     }
     config.deviceConfigs = normalizeDeviceConfigs(merged);
   }
   // Only the three known values are accepted — a malformed IPC payload can't corrupt the config.
   if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {
     config.theme = partial.theme;
+  }
+  // Whole-list replace, like deviceConfigs: the renderer always sends the complete list, and an
+  // empty array is meaningful (the user deleted every command). Malformed entries are dropped by
+  // the normalizer.
+  if (Array.isArray(partial.commands)) {
+    config.commands = normalizeCommands(partial.commands);
   }
 }

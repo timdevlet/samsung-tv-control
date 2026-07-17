@@ -26,6 +26,47 @@ export function acceleratorKeyFromCode(code: string): string | null {
   return NAMED_KEYS[code] ?? null;
 }
 
+// Display order and labels for the modifier chips: conventional rank (Ctrl, Alt, Shift, Cmd — same
+// as hotkeyLabel in src/domain/daemon.ts), mac symbols vs text names elsewhere.
+const MOD_DISPLAY: readonly { token: string; mac: string; other: string }[] = [
+  { token: "Control", mac: "⌃", other: "Ctrl" },
+  { token: "Alt", mac: "⌥", other: "Alt" },
+  { token: "Shift", mac: "⇧", other: "Shift" },
+  { token: "Command", mac: "⌘", other: "Win" },
+];
+
+// Key tokens with a well-known glyph; everything else (letters, digits, F-keys, Space) is shown
+// as-is.
+const KEY_GLYPHS: Record<string, string> = {
+  Up: "↑",
+  Down: "↓",
+  Left: "←",
+  Right: "→",
+  Return: "↩",
+  Backspace: "⌫",
+  Delete: "⌦",
+  Tab: "⇥",
+};
+
+export type AcceleratorPart = { token: string; label: string; kind: "mod" | "key" };
+
+// Split a stored accelerator string into display chips: modifiers first (reordered to the
+// conventional rank above, whatever order they were stored in), then the key. Display-only —
+// the stored string is untouched.
+export function acceleratorParts(accelerator: string, isMac: boolean): AcceleratorPart[] {
+  if (!accelerator) return [];
+  const tokens = accelerator.split("+");
+  const mods = MOD_DISPLAY.filter((m) => tokens.includes(m.token)).map((m) => ({
+    token: m.token,
+    label: isMac ? m.mac : m.other,
+    kind: "mod" as const,
+  }));
+  const keys = tokens
+    .filter((t) => !MOD_DISPLAY.some((m) => m.token === t))
+    .map((t) => ({ token: t, label: KEY_GLYPHS[t] ?? t, kind: "key" as const }));
+  return [...mods, ...keys];
+}
+
 type KeyLike = Pick<KeyboardEvent, "key" | "code" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 
 export type CaptureResult =

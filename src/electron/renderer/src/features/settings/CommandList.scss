@@ -1,0 +1,72 @@
+/* The Commands group: one card per command — controls row (action | HDMI? | hotkey | ▶ | delete)
+   over the TV-target checkbox row. */
+.command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+
+  .command-item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .command-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    /* Action select keeps its natural width; the hotkey field absorbs the rest. */
+    select.select {
+      width: auto;
+      flex: 0 0 auto;
+    }
+
+    .command-hdmi {
+      flex: 0 0 auto;
+    }
+
+    /* The hotkey capture field must be allowed to shrink/grow inside the row (the input's
+       min-content size would otherwise overflow and clip the clear button). */
+    .hotkey {
+      flex: 1;
+      min-width: 0;
+
+      .hotkey-input {
+        min-width: 0;
+      }
+    }
+  }
+
+  .command-tvs {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    font-size: 12px;
+
+    .command-tvs-label {
+      color: var(--muted);
+    }
+
+    label {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }
+
+    /* Shown while no TV is checked — the command falls back to every enabled TV. */
+    .command-tvs-all {
+      color: var(--muted);
+      font-style: italic;
+    }
+  }
+
+  .command-add {
+    margin-top: 2px;
+  }
+}

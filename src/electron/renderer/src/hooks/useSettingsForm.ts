@@ -1,27 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import type { AppSettings, DeviceConfigSettings, ThemePreference } from "../types";
+import type { AppSettings, CommandSettings, DeviceConfigSettings, ThemePreference } from "../types";
 
 export interface SettingsDraft {
   clientId: string;
   clientSecret: string;
   redirectUri: string;
-  pcInput: string;
   minimizeToTrayOnClose: boolean;
-  wakeHotkey: string;
-  offHotkey: string;
   selectedDeviceIds: ReadonlySet<string>;
-  // Per-TV settings keyed by deviceId; "" = unset/unbound (entries are pruned on save by the
+  // Per-TV settings keyed by deviceId; "" = unset (entries are pruned on save by the
   // main process when every field is empty).
   deviceConfigs: Record<string, DeviceConfigSettings>;
   theme: ThemePreference;
+  // User-defined command list, in display order; persisted as a whole-list replace.
+  commands: CommandSettings[];
 }
 
 const EMPTY_DEVICE_CONFIG: DeviceConfigSettings = {
   alias: "",
   description: "",
-  pcInput: "",
-  wakeHotkey: "",
-  offHotkey: "",
   host: "",
   mac: "",
   inputKeySeq: "",
@@ -44,13 +40,11 @@ export function useSettingsForm(
     clientId: initial.clientId,
     clientSecret: initial.clientSecret,
     redirectUri: initial.redirectUri,
-    pcInput: initial.pcInput,
     minimizeToTrayOnClose: initial.minimizeToTrayOnClose,
-    wakeHotkey: initial.wakeHotkey,
-    offHotkey: initial.offHotkey,
     selectedDeviceIds: new Set(initial.selectedDeviceIds),
     deviceConfigs: initial.deviceConfigs,
     theme: initial.theme,
+    commands: initial.commands,
   });
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +69,19 @@ export function useSettingsForm(
           [key]: value,
         },
       },
+    }));
+
+  // Command-list edits: append, drop by id, patch fields of one row by id.
+  const addCommand = (cmd: CommandSettings) =>
+    setDraft((d) => ({ ...d, commands: [...d.commands, cmd] }));
+
+  const removeCommand = (id: string) =>
+    setDraft((d) => ({ ...d, commands: d.commands.filter((c) => c.id !== id) }));
+
+  const setCommand = (id: string, patch: Partial<CommandSettings>) =>
+    setDraft((d) => ({
+      ...d,
+      commands: d.commands.map((c) => (c.id === id ? { ...c, ...patch } : c)),
     }));
 
   // persistRef keeps the debounce effect keyed on draft changes alone (the persist closure is
@@ -109,5 +116,16 @@ export function useSettingsForm(
   const flush = (): Promise<void> => pending.current?.() ?? Promise.resolve();
   useEffect(() => () => void flush(), []);
 
-  return { draft, set, toggleDevice, setDeviceConfig, error, setError, flush };
+  return {
+    draft,
+    set,
+    toggleDevice,
+    setDeviceConfig,
+    addCommand,
+    removeCommand,
+    setCommand,
+    error,
+    setError,
+    flush,
+  };
 }

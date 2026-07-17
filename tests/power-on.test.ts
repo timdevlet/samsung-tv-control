@@ -375,7 +375,7 @@ describe("wake-path failure propagation", () => {
 
     expect(attempts).toEqual([1]); // one failed attempt, then success on the retry
     expect(logs.some((l) => l.includes("network error (ENETUNREACH)"))).toBe(true);
-    expect(logs).toContain("Done — TV is on and switched to PC.");
+    expect(logs).toContain("Done — TV is on and on the target input.");
   });
 
   it("a token-refresh network failure is logged without leaking secrets", async () => {

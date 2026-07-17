@@ -18,48 +18,19 @@ vi.mock("../src/config.js", () => ({
 }));
 
 import { getSettings, saveSettings } from "../src/electron/settings.js";
-import { defaultHotkeys } from "../src/domain/daemon.js";
-
-const HOTKEY_DEFAULTS = defaultHotkeys(process.platform === "darwin" ? "mac" : "other");
 
 beforeEach(() => {
   store = { pcInput: "HDMI2" };
 });
 
-describe("global hotkeys in getSettings", () => {
-  it("shows the platform default combo when a hotkey was never configured", async () => {
-    const settings = await getSettings();
-    expect(settings.wakeHotkey).toBe(HOTKEY_DEFAULTS.wake);
-    expect(settings.offHotkey).toBe(HOTKEY_DEFAULTS.off);
-  });
-
-  it("shows a configured combo as-is", async () => {
-    store.wakeHotkey = "Command+Shift+P";
-    const settings = await getSettings();
-    expect(settings.wakeHotkey).toBe("Command+Shift+P");
-    expect(settings.offHotkey).toBe(HOTKEY_DEFAULTS.off);
-  });
-
-  it("stays empty for an explicitly cleared hotkey (command disabled, no default fallback)", async () => {
-    store.wakeHotkey = "";
-    store.offHotkey = "  ";
-    const settings = await getSettings();
-    expect(settings.wakeHotkey).toBe("");
-    expect(settings.offHotkey).toBe("");
-  });
-});
-
 describe("deviceConfigs in getSettings", () => {
   it("fills missing fields with empty strings and prunes empty entries", async () => {
-    store.deviceConfigs = { tv1: { wakeHotkey: "Command+Control+1", alias: "65 TV" }, tv2: {} };
+    store.deviceConfigs = { tv1: { alias: "65 TV", description: "living room" }, tv2: {} };
     const settings = await getSettings();
     expect(settings.deviceConfigs).toEqual({
       tv1: {
         alias: "65 TV",
-        description: "",
-        pcInput: "",
-        wakeHotkey: "Command+Control+1",
-        offHotkey: "",
+        description: "living room",
         host: "",
         mac: "",
         inputKeySeq: "",
@@ -71,15 +42,16 @@ describe("deviceConfigs in getSettings", () => {
 
 describe("deviceConfigs in saveSettings", () => {
   it("replaces the whole map when one is supplied", async () => {
-    store.deviceConfigs = { tv1: { wakeHotkey: "Command+Control+1" } };
+    store.deviceConfigs = { tv1: { alias: "Old TV" } };
     await saveSettings({
       deviceConfigs: {
         tv2: {
           alias: "65 TV",
           description: "living room tv",
-          pcInput: "HDMI3",
-          wakeHotkey: "Command+Control+2",
-          offHotkey: "",
+          host: "",
+          mac: "",
+          inputKeySeq: "",
+          paired: false,
         },
       },
     });
@@ -87,50 +59,93 @@ describe("deviceConfigs in saveSettings", () => {
       tv2: {
         alias: "65 TV",
         description: "living room tv",
-        pcInput: "HDMI3",
-        wakeHotkey: "Command+Control+2",
       },
     });
   });
 
   it("removes an entry when all of its fields are cleared", async () => {
-    store.deviceConfigs = { tv1: { wakeHotkey: "Command+Control+1", alias: "65 TV" } };
+    store.deviceConfigs = { tv1: { alias: "65 TV", description: "old" } };
     await saveSettings({
       deviceConfigs: {
-        tv1: { alias: "", description: "", pcInput: "", wakeHotkey: "", offHotkey: "" },
+        tv1: { alias: "", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
       },
     });
     expect(store.deviceConfigs).toEqual({});
   });
 
   it("leaves the stored map untouched when deviceConfigs is absent or not an object", async () => {
-    store.deviceConfigs = { tv1: { wakeHotkey: "Command+Control+1" } };
-    await saveSettings({ pcInput: "HDMI3" });
-    expect(store.deviceConfigs).toEqual({ tv1: { wakeHotkey: "Command+Control+1" } });
+    store.deviceConfigs = { tv1: { alias: "65 TV" } };
+    await saveSettings({ minimizeToTrayOnClose: false });
+    expect(store.deviceConfigs).toEqual({ tv1: { alias: "65 TV" } });
     await saveSettings({ deviceConfigs: "garbage" as never });
-    expect(store.deviceConfigs).toEqual({ tv1: { wakeHotkey: "Command+Control+1" } });
+    expect(store.deviceConfigs).toEqual({ tv1: { alias: "65 TV" } });
   });
 
   it("normalizes a malformed map down to its valid entries", async () => {
     await saveSettings({
       deviceConfigs: {
-        tv1: { wakeHotkey: 42, offHotkey: "  Command+Control+9 ", alias: ["nope"] },
+        tv1: { alias: 42, description: "  living room ", host: ["nope"] },
         tv2: "garbage",
       } as never,
     });
-    expect(store.deviceConfigs).toEqual({ tv1: { offHotkey: "Command+Control+9" } });
+    expect(store.deviceConfigs).toEqual({ tv1: { description: "living room" } });
   });
 
   it("does not touch unrelated fields", async () => {
-    store.wakeHotkey = "Command+Control+E";
     store.selectedDeviceIds = ["tv1"];
+    store.pcInput = "HDMI4";
     await saveSettings({
       deviceConfigs: {
-        tv9: { alias: "", description: "", pcInput: "", wakeHotkey: "Command+Control+9", offHotkey: "" },
+        tv9: { alias: "Bedroom", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
       },
     });
-    expect(store.wakeHotkey).toBe("Command+Control+E");
     expect(store.selectedDeviceIds).toEqual(["tv1"]);
+    expect(store.pcInput).toBe("HDMI4");
+  });
+
+  it("carries the stored per-TV pcInput forward across a whole-map save (no UI edits it)", async () => {
+    store.deviceConfigs = { tv1: { alias: "65 TV", pcInput: "HDMI3" } };
+    await saveSettings({
+      deviceConfigs: {
+        tv1: { alias: "Renamed", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
+      },
+    });
+    expect(store.deviceConfigs).toEqual({ tv1: { alias: "Renamed", pcInput: "HDMI3" } });
+  });
+});
+
+describe("commands in getSettings/saveSettings", () => {
+  it("exposes stored commands with every field filled", async () => {
+    store.commands = [
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3" },
+      { id: "b", action: "tvOff" },
+    ];
+    const settings = await getSettings();
+    expect(settings.commands).toEqual([
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3" },
+      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", hotkey: "" },
+    ]);
+  });
+
+  it("replaces the whole list on save, dropping malformed entries", async () => {
+    store.commands = [{ id: "a", action: "tvOn" }];
+    await saveSettings({
+      commands: [
+        { id: "b", action: "switchHdmi", deviceIds: ["tv2"], hdmi: "HDMI2", hotkey: "" },
+        { id: "c", action: "nonsense", deviceIds: [], hdmi: "", hotkey: "" },
+      ] as never,
+    });
+    expect(store.commands).toEqual([
+      { id: "b", action: "switchHdmi", deviceIds: ["tv2"], hdmi: "HDMI2" },
+    ]);
+  });
+
+  it("persists an emptied list (all commands deleted) but ignores a missing field", async () => {
+    store.commands = [{ id: "a", action: "tvOn" }];
+    await saveSettings({ minimizeToTrayOnClose: true });
+    expect(store.commands).toEqual([{ id: "a", action: "tvOn" }]);
+    await saveSettings({ commands: [] });
+    expect(store.commands).toEqual([]);
   });
 });
 
@@ -158,9 +173,6 @@ describe("LAN device fields", () => {
         "local:tv": {
           alias: "TV",
           description: "",
-          pcInput: "",
-          wakeHotkey: "",
-          offHotkey: "",
           host: "1.2.3.4",
           mac: "",
           inputKeySeq: "",

@@ -103,6 +103,11 @@ export interface App {
   // Resolves true when the commands went out, false when no TVs were selected.
   switch(inputOverride?: string, deviceIds?: string[], opts?: SwitchOptions): Promise<boolean>;
   off(deviceIds?: string[]): Promise<boolean>;
+  // Power the TVs on without touching the input (the "TV on" command).
+  powerOn(deviceIds?: string[]): Promise<boolean>;
+  // Switch the input on TVs that are already on; an off TV is left off (the "switch HDMI"
+  // command — unlike switch(), it never powers anything on).
+  switchInputOnly(input: string, deviceIds?: string[]): Promise<boolean>;
   listDevices(): Promise<void>;
   // The TVs on the account (for the Settings selection UI).
   listTVs(): Promise<STDevice[]>;
@@ -254,22 +259,18 @@ export function createApp(): App {
     log("   Run `npm start` to wake the TV and switch to PC.\n");
   }
 
-  // Switch one TV to its PC input, powering it on first if needed. `auto` = triggered by the
-  // daemon itself (resume/boot), not an explicit user action — see SwitchOptions.
-  async function switchOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string, auto: boolean): Promise<void> {
-    // 1) Check status first; if off, wake it before switching input. We re-read after waking
-    // because the off-state status often doesn't include the input-source map.
-    let status = await transport.getStatus(deviceId);
-    const wasOn = status.power === "on";
-    status = await ensurePoweredOn(transport, deviceId, status, tag);
-
-    // If the TV never came on after all retries, stop here rather than throwing: there's no
-    // input-source map to switch to, and ensurePoweredOn has already logged the give-up. Throwing
-    // would make the daemon's wake retry pointlessly re-run the whole already-connected operation
-    // (its retry is for transient connect/network failures right after wake, not a dead TV).
-    if (status.power !== "on") return;
-
-    // 2) Switch the input to the PC, skipping when it's already on the target.
+  // Switch one already-on TV to `pcInput` — the shared second step of switchOne/inputOnlyOne.
+  // `wasOn` = the TV was on before this operation (vs just woken by us); `auto` = triggered by
+  // the daemon itself (resume/boot), not an explicit user action — see SwitchOptions.
+  async function applyInput(
+    transport: TVTransport,
+    deviceId: string,
+    status: TVStatus,
+    pcInput: string,
+    tag: string,
+    wasOn: boolean,
+    auto: boolean,
+  ): Promise<void> {
     const capability = status.inputCapability;
     if (!capability) {
       throw new Error(
@@ -298,11 +299,52 @@ export function createApp(): App {
     if (isOnInput(status, target)) {
       log(`${tag}Input is already on ${target}.`);
     } else {
-      log(`${tag}Switching input to ${target} (PC)...`);
+      log(`${tag}Switching input to ${target}...`);
       await transport.setInputSource(deviceId, capability, target);
     }
+  }
 
-    log(`${tag}Done — TV is on and switched to PC.`);
+  // Switch one TV to its PC input, powering it on first if needed. `auto` = triggered by the
+  // daemon itself (resume/boot), not an explicit user action — see SwitchOptions.
+  async function switchOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string, auto: boolean): Promise<void> {
+    // 1) Check status first; if off, wake it before switching input. We re-read after waking
+    // because the off-state status often doesn't include the input-source map.
+    let status = await transport.getStatus(deviceId);
+    const wasOn = status.power === "on";
+    status = await ensurePoweredOn(transport, deviceId, status, tag);
+
+    // If the TV never came on after all retries, stop here rather than throwing: there's no
+    // input-source map to switch to, and ensurePoweredOn has already logged the give-up. Throwing
+    // would make the daemon's wake retry pointlessly re-run the whole already-connected operation
+    // (its retry is for transient connect/network failures right after wake, not a dead TV).
+    if (status.power !== "on") return;
+
+    // 2) Switch the input to the PC, skipping when it's already on the target.
+    await applyInput(transport, deviceId, status, pcInput, tag, wasOn, auto);
+
+    log(`${tag}Done — TV is on and on the target input.`);
+  }
+
+  // Power one TV on without touching its input (the "TV on" command).
+  async function powerOnOne(transport: TVTransport, deviceId: string, tag: string): Promise<void> {
+    const status = await transport.getStatus(deviceId);
+    if (status.power === "on") {
+      log(`${tag}TV is already on.`);
+      return;
+    }
+    await ensurePoweredOn(transport, deviceId, status, tag);
+  }
+
+  // Switch one TV's input only if it's already on; an off TV is deliberately left off.
+  async function inputOnlyOne(transport: TVTransport, deviceId: string, input: string, tag: string): Promise<void> {
+    const status = await transport.getStatus(deviceId);
+    if (status.power !== "on") {
+      log(`${tag}TV is off — not switching its input (use a "TV on + input" command to wake it).`);
+      return;
+    }
+    // Always user-initiated (there is no automatic trigger for input-only), so auto=false.
+    await applyInput(transport, deviceId, status, input, tag, true, false);
+    log(`${tag}Done — input switched.`);
   }
 
   // Switch every targeted TV to its PC input, powering each on first if needed.
@@ -320,6 +362,31 @@ export function createApp(): App {
           deviceTag(config, deviceId, ids),
           opts?.auto ?? false,
         ),
+      deviceIds,
+    );
+  }
+
+  // Power every targeted TV on, leaving inputs alone.
+  async function powerOn(deviceIds?: string[]): Promise<boolean> {
+    const { config, transport } = await connect();
+    const ids = deviceIds ?? resolveDeviceIds(config);
+    return forEachSelected(
+      config,
+      transport,
+      (deviceId) => powerOnOne(transport, deviceId, deviceTag(config, deviceId, ids)),
+      deviceIds,
+    );
+  }
+
+  // Switch every targeted TV that's already on to `input`; off TVs stay off.
+  async function switchInputOnly(input: string, deviceIds?: string[]): Promise<boolean> {
+    const { config, transport } = await connect();
+    const ids = deviceIds ?? resolveDeviceIds(config);
+    return forEachSelected(
+      config,
+      transport,
+      (deviceId) =>
+        inputOnlyOne(transport, deviceId, inputFor(config, deviceId, input), deviceTag(config, deviceId, ids)),
       deviceIds,
     );
   }
@@ -390,5 +457,5 @@ export function createApp(): App {
   }
 
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.
-  return { login, switch: switchInput, off, listDevices, listTVs };
+  return { login, switch: switchInput, off, powerOn, switchInputOnly, listDevices, listTVs };
 }

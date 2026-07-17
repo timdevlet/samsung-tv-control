@@ -202,8 +202,8 @@ describe("installMockCloud + createApp integration", () => {
     await vi.runAllTimersAsync();
     await expect(first).resolves.toBe(true);
     expect(logs).toContain("TV is on.");
-    expect(logs).toContain("Switching input to HDMI2 (PC)...");
-    expect(logs).toContain("Done — TV is on and switched to PC.");
+    expect(logs).toContain("Switching input to HDMI2...");
+    expect(logs).toContain("Done — TV is on and on the target input.");
 
     // The fake cloud kept the state: a second switch finds the TV already on the PC input.
     const second = app.switch();

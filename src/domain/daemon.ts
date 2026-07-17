@@ -10,15 +10,6 @@
 
 export type Platform = "mac" | "other";
 
-// Default combos as Electron accelerator strings, used when a hotkey was never configured
-// (config field unset). An empty string in config is NOT a fallback to these — it means the
-// user cleared the binding and the command has no hotkey. Cmd→meta on mac; Ctrl+Alt elsewhere.
-export function defaultHotkeys(platform: Platform): { wake: string; off: string } {
-  return platform === "mac"
-    ? { wake: "Command+Control+E", off: "Command+Control+Q" }
-    : { wake: "Control+Alt+E", off: "Control+Alt+Q" };
-}
-
 // Render an Electron accelerator string ("Command+Control+E") as a short human label for
 // logs/menus, using the platform's modifier names (mac shows Cmd/Ctrl/Opt; elsewhere Ctrl/Alt/Win).
 // An empty/unset accelerator renders as "unset". Tokens are normalized case-insensitively;
@@ -63,57 +54,14 @@ export function hotkeyLabel(accelerator: string | undefined, platform: Platform)
   return [...ordered, key].join("+");
 }
 
-// Hotkey binding groups
+// Trigger targets
 
-import type { DeviceConfig } from "./config.js";
-
-// Who a registered accelerator acts on. The global pair acts on the TVs selected in Settings
-// (includeSelected, resolved from config at trigger time); per-device bindings carry their
-// explicit deviceIds. Both can be true for one accelerator when the user binds the same combo
-// globally and on specific TVs — the trigger unions the two sets.
+// Who a trigger acts on. includeSelected = the TVs selected in Settings (resolved from config at
+// trigger time); deviceIds carries explicit TVs (a per-TV command). Both can be combined — the
+// trigger unions the two sets.
 export interface HotkeyTarget {
   includeSelected: boolean;
   deviceIds: string[];
-}
-
-export interface AccelBindings {
-  wake?: HotkeyTarget;
-  off?: HotkeyTarget;
-}
-
-// Group every non-empty binding (the global wake/off pair plus each TV's own pair) by
-// accelerator, so daemon-core registers each combo with the OS exactly once and a single
-// keypress fires everything bound to it — several TVs on one combo act together in one trigger.
-// An accelerator may come back with BOTH wake and off set (pathological: one keypress would
-// wake a TV and sleep the PC); the caller must arm only the wake side and warn — kept in the
-// result so the conflict stays observable.
-export function groupHotkeyBindings(
-  globalWake: string,
-  globalOff: string,
-  deviceConfigs: Record<string, DeviceConfig>,
-): Map<string, AccelBindings> {
-  const result = new Map<string, AccelBindings>();
-  const target = (accel: string, kind: "wake" | "off"): HotkeyTarget | null => {
-    if (!accel.trim()) return null;
-    const bindings = result.get(accel.trim()) ?? {};
-    const t = (bindings[kind] ??= { includeSelected: false, deviceIds: [] });
-    result.set(accel.trim(), bindings);
-    return t;
-  };
-
-  const globalWakeTarget = target(globalWake, "wake");
-  if (globalWakeTarget) globalWakeTarget.includeSelected = true;
-  const globalOffTarget = target(globalOff, "off");
-  if (globalOffTarget) globalOffTarget.includeSelected = true;
-
-  for (const [deviceId, cfg] of Object.entries(deviceConfigs)) {
-    for (const kind of ["wake", "off"] as const) {
-      const t = target(cfg[`${kind}Hotkey`] ?? "", kind);
-      if (t && !t.deviceIds.includes(deviceId)) t.deviceIds.push(deviceId);
-    }
-  }
-
-  return result;
 }
 
 // Boot window

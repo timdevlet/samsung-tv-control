@@ -96,6 +96,7 @@ export default function App() {
           initialSettings={settings}
           authorized={authorized}
           onAuthChanged={onAuthChanged}
+          onToast={toasts.push}
         />
       )}
 

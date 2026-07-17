@@ -141,6 +141,16 @@ describe("config policy", () => {
   it("does not override an explicit clientSecret", () => {
     expect(mergeConfig({ secret: "s", clientSecret: "real" }).clientSecret).toBe("real");
   });
+  it("drops the retired hotkey keys (hotkeys live on commands now)", () => {
+    const merged = mergeConfig({
+      wakeHotkey: "Command+Control+E",
+      offHotkey: "Command+Control+Q",
+      hotkeyBindings: [{ hotkey: "Command+Shift+P", action: "wakePc" }],
+    });
+    expect(merged).not.toHaveProperty("wakeHotkey");
+    expect(merged).not.toHaveProperty("offHotkey");
+    expect(merged).not.toHaveProperty("hotkeyBindings");
+  });
   it("defaultConfig is defaults only", () => {
     expect(defaultConfig()).toEqual({ pcInput: "HDMI2", minimizeToTrayOnClose: true });
   });

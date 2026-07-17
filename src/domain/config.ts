@@ -24,12 +24,9 @@ export interface DeviceConfig {
   alias?: string;
   // Free-text note shown under the name (e.g. "living room tv").
   description?: string;
-  // Input the PC is on for THIS TV; unset = the shared pcInput.
+  // Input the PC is on for THIS TV; unset = the shared pcInput. No longer editable in the UI —
+  // kept because the daemon's automatic wake (resume/boot) still switches to the PC input.
   pcInput?: string;
-  // Hotkeys (Electron accelerator strings) firing the action for only this TV,
-  // independent of selectedDeviceIds. Empty/unset = no action of that kind.
-  wakeHotkey?: string;
-  offHotkey?: string;
 
   // Local (LAN) transport fields — set for LAN-paired TVs (deviceId "local:…"); cloud TVs
   // (SmartThings UUIDs) leave them unset.
@@ -56,8 +53,6 @@ const DEVICE_CONFIG_FIELDS = [
   "alias",
   "description",
   "pcInput",
-  "wakeHotkey",
-  "offHotkey",
   "host",
   "mac",
   "inputKeySeq",
@@ -91,7 +86,9 @@ export interface TVConfig {
 
   // Your preference
   // Target input the PC is on. Matched against the TV's supported-input map by
-  // id ("HDMI3") first, then by label ("PC"). Default "HDMI2".
+  // id ("HDMI3") first, then by label ("PC"). Default "HDMI2". No longer editable in the UI —
+  // kept because the daemon's automatic wake (resume/boot), the Main-screen buttons, and the
+  // tray actions still switch to the PC input; user-facing input choices live in `commands`.
   pcInput: string;
 
   // App behavior
@@ -99,25 +96,22 @@ export interface TVConfig {
   // keeps running. When false, closing the window quits the app.
   minimizeToTrayOnClose?: boolean;
 
-  // Global hotkeys (Electron accelerator strings like "Command+Control+E").
-  // Registered system-wide. Unset = the platform default combo is active; an explicit
-  // empty string = the user cleared the binding and the action is disabled (no hotkey).
-  // wakeHotkey fires "Wake TV → PC"; offHotkey fires "TV Off & Sleep".
-  wakeHotkey?: string;
-  offHotkey?: string;
-
   // Device ids of the TVs commands target. Chosen in Settings from the account's
   // TV list. Empty/unset means none selected — commands no-op rather than auto-pick.
   selectedDeviceIds?: string[];
 
-  // Per-TV settings keyed by SmartThings deviceId: alias/description, an input override, and
-  // hotkeys that fire the action for ONLY that TV (selectedDeviceIds scopes only the global
-  // wakeHotkey/offHotkey above).
+  // Per-TV settings keyed by SmartThings deviceId: alias/description, LAN fields, and a stored
+  // input override (see DeviceConfig.pcInput).
   deviceConfigs?: Record<string, DeviceConfig>;
 
   // App color theme. "system" follows the OS light/dark setting. Unset means dark —
   // the app's historical appearance.
   theme?: ThemePreference;
+
+  // User-defined command list (Settings → Commands): each entry is an action, an HDMI input for
+  // the switch actions, and an optional hotkey. Run from the Settings list or via the hotkey;
+  // acts on the TVs selected in Settings, like the built-in wake/off pair.
+  commands?: CommandConfig[];
 }
 
 const DEFAULTS: TVConfig = {
@@ -126,7 +120,15 @@ const DEFAULTS: TVConfig = {
 };
 
 // Merge parsed config over defaults and migrate/retire legacy keys.
-export function mergeConfig(parsed: Partial<TVConfig> & { secret?: string; transportMode?: string }): TVConfig {
+export function mergeConfig(
+  parsed: Partial<TVConfig> & {
+    secret?: string;
+    transportMode?: string;
+    wakeHotkey?: string;
+    offHotkey?: string;
+    hotkeyBindings?: unknown;
+  },
+): TVConfig {
   // Accept the legacy "secret" key as an alias for clientSecret.
   if (parsed.secret && !parsed.clientSecret) parsed.clientSecret = parsed.secret;
   delete parsed.secret;
@@ -134,6 +136,11 @@ export function mergeConfig(parsed: Partial<TVConfig> & { secret?: string; trans
   // RoutingTransport) — nothing selects a transport globally anymore. Drop the stale key so old
   // configs shed it on their next save.
   delete parsed.transportMode;
+  // The global wake/off hotkeys (and the even older hotkeyBindings list) are retired: hotkeys
+  // are now bound per command (see `commands`). Drop the stale keys so old configs shed them.
+  delete parsed.wakeHotkey;
+  delete parsed.offHotkey;
+  delete parsed.hotkeyBindings;
   return { ...DEFAULTS, ...parsed };
 }
 
@@ -174,6 +181,101 @@ export function canonicalizeMac(value: string): string {
   const hex = value.replace(/[^0-9a-fA-F]/g, "").toLowerCase();
   if (hex.length !== 12) return "";
   return hex.match(/.{2}/g)!.join(":");
+}
+
+// User-defined commands
+
+// What a command does when run. The HDMI-switching actions carry which input to switch to;
+// "tvOffSleepPc" also puts this computer to sleep after the TV is off.
+export type CommandAction = "tvOn" | "tvOff" | "tvOnHdmi" | "tvOffSleepPc" | "switchHdmi";
+
+export const COMMAND_ACTIONS: readonly CommandAction[] = [
+  "tvOn",
+  "tvOff",
+  "tvOnHdmi",
+  "tvOffSleepPc",
+  "switchHdmi",
+];
+
+// The HDMI inputs a command can switch to (matched against the TV's input map like pcInput —
+// by id first, then label).
+export const COMMAND_HDMI_INPUTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const;
+
+// One entry of the user-defined command list.
+export interface CommandConfig {
+  // Stable id (minted by the UI when the row is added) — React key + run/delete identity.
+  id: string;
+  action: CommandAction;
+  // The TVs this command targets (checkboxes in the UI). Unset/empty = every TV selected in
+  // Settings ("all enabled TVs").
+  deviceIds?: string[];
+  // Which HDMI input to switch to; present only for the HDMI-switching actions.
+  hdmi?: string;
+  // Optional global hotkey (Electron accelerator). Unset/empty = run only from the Settings list.
+  hotkey?: string;
+}
+
+// True when the action switches inputs, so a command needs its HDMI selection.
+export function commandUsesHdmi(action: CommandAction): boolean {
+  return action === "tvOnHdmi" || action === "switchHdmi";
+}
+
+// Human label for a command, used in logs and as the accessible name of its Run button.
+export function commandLabel(cmd: CommandConfig): string {
+  switch (cmd.action) {
+    case "tvOn":
+      return "TV on";
+    case "tvOff":
+      return "TV off";
+    case "tvOnHdmi":
+      return `TV on → ${cmd.hdmi ?? "HDMI?"}`;
+    case "tvOffSleepPc":
+      return "TV off + sleep PC";
+    case "switchHdmi":
+      return `Switch to ${cmd.hdmi ?? "HDMI?"}`;
+  }
+}
+
+// Coerce an untrusted value (config file / IPC payload) to a clean command list. Entries with an
+// unknown action are dropped; an HDMI action outside the known list falls back to HDMI1 and a
+// non-HDMI action sheds any stray hdmi field; a missing id gets a positional fallback (stable
+// enough for React keys — the UI always mints real ids for rows it creates).
+export function normalizeCommands(value: unknown): CommandConfig[] {
+  if (!Array.isArray(value)) return [];
+  const result: CommandConfig[] = [];
+  for (const raw of value) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    const action = entry.action;
+    if (!COMMAND_ACTIONS.includes(action as CommandAction)) continue;
+    const cmd: CommandConfig = {
+      id:
+        typeof entry.id === "string" && entry.id.trim()
+          ? entry.id.trim()
+          : `cmd-${result.length + 1}`,
+      action: action as CommandAction,
+    };
+    // Target TVs: an array of non-empty ids, deduped. The pre-checkbox shape stored a single
+    // `deviceId` string — migrate it. Empty/absent = all enabled TVs.
+    const rawIds = Array.isArray(entry.deviceIds)
+      ? entry.deviceIds
+      : typeof entry.deviceId === "string"
+        ? [entry.deviceId]
+        : [];
+    const deviceIds = [
+      ...new Set(
+        rawIds.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.trim()),
+      ),
+    ];
+    if (deviceIds.length > 0) cmd.deviceIds = deviceIds;
+    if (commandUsesHdmi(cmd.action)) {
+      const hdmi = typeof entry.hdmi === "string" ? entry.hdmi.trim().toUpperCase() : "";
+      cmd.hdmi = (COMMAND_HDMI_INPUTS as readonly string[]).includes(hdmi) ? hdmi : "HDMI1";
+    }
+    if (typeof entry.hotkey === "string" && entry.hotkey.trim()) cmd.hotkey = entry.hotkey.trim();
+    result.push(cmd);
+  }
+  return result;
 }
 
 // Coerce an untrusted value (config file / IPC payload) to a clean per-device config map:

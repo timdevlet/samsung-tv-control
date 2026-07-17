@@ -8,6 +8,7 @@ import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
 import type { STDevice } from "../domain/tv.js";
 import type { ActionResult } from "../domain/daemon.js";
+import type { CommandConfig } from "../domain/config.js";
 
 type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
 type DeviceListResult =
@@ -32,6 +33,8 @@ const tvAPI = {
   tvOffSleep: (): Promise<ActionResult> => ipcRenderer.invoke("action:off"),
   // TV off without sleeping this PC.
   tvOff: (): Promise<ActionResult> => ipcRenderer.invoke("action:off-only"),
+  // Run a user-defined command (Settings → Commands) as currently shown in the UI.
+  runCommand: (cmd: CommandConfig): Promise<ActionResult> => ipcRenderer.invoke("command:run", cmd),
   // Auth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
   login: (): Promise<AuthResult> => ipcRenderer.invoke("auth:login"),

@@ -4,11 +4,27 @@
   gap: 6px;
   align-items: stretch;
 
+  /* Self-contained input look (matches .field input in Field.scss) so the field renders the
+     same whether or not it sits inside a Field wrapper (e.g. a command row). */
   .hotkey-input {
     flex: 1;
     cursor: pointer;
     font-family: "Cascadia Code", "Consolas", ui-monospace, monospace;
     text-align: center;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+
+    &::placeholder {
+      color: var(--muted);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
   }
 
   /* While listening for a combo, highlight the field and prompt the user. */

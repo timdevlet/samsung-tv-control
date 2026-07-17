@@ -6,8 +6,6 @@ import { DangerZone } from "../../components/DangerZone";
 import { Disclosure } from "../../components/Disclosure";
 import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
-import { HintPills, type Hint } from "../../components/HintPills";
-import { HotkeyField } from "../../components/HotkeyField";
 import { ScrollArea } from "../../components/ScrollArea";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { SettingsGroup } from "../../components/SettingsGroup";
@@ -15,14 +13,11 @@ import { SwitchField } from "../../components/SwitchField";
 import { TextInput } from "../../components/TextInput";
 import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
+import type { ToastKind } from "../../lib/toasts";
+import { CommandList } from "./CommandList";
 import { DeviceList } from "./DeviceList";
 import { OAuthClientFields } from "./OAuthClientFields";
 import "./SettingsView.scss";
-
-const PC_INPUT_HINTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4"] as const;
-// The per-TV field additionally offers "Shared", which clears the override (empty string) so the
-// TV falls back to the global PC input.
-const TV_PC_INPUT_HINTS: readonly Hint[] = [{ label: "Shared", value: "" }, ...PC_INPUT_HINTS];
 
 const THEME_OPTIONS = [
   { value: "light", label: "Light" },
@@ -105,6 +100,7 @@ export function SettingsView({
   initialSettings,
   authorized,
   onAuthChanged,
+  onToast,
 }: {
   initialSettings: AppSettings;
   // Initial cloud auth state; fetched fresh by App right before mounting. Signing in from the
@@ -113,6 +109,8 @@ export function SettingsView({
   // Re-fetch auth status after a sign-in/out or a client change; returns the latest so the caller
   // can react (App keeps the pill it passes back down in step).
   onAuthChanged: () => Promise<AuthStatus>;
+  // Outcome toasts for the Commands group's Run buttons (the app-level ToastStack).
+  onToast: (kind: ToastKind, text: string) => void;
 }) {
   const { state: devices, reload: reloadDevices } = useDeviceList();
   // Lets the persist closure read the *current* list state without retriggering an autosave
@@ -122,9 +120,6 @@ export function SettingsView({
 
   const form = useSettingsForm(initialSettings, async (draft) => {
     const deviceState = devicesRef.current;
-    // Blank pcInput is ignored by the main process (a saved value can't be blanked by accident —
-    // see src/electron/settings.ts); hotkeys apply as-is, "" meaningfully unbinds.
-    //
     // The device selection/config is persisted from the draft, which is always seeded from disk
     // (getSettings) — so autosaving while the list is still loading can't spuriously clear stored
     // state. This is essential for a local-only setup: a not-yet-paired LAN TV never appears in
@@ -144,10 +139,7 @@ export function SettingsView({
       clientId: draft.clientId.trim(),
       clientSecret: draft.clientSecret.trim(),
       redirectUri: draft.redirectUri.trim(),
-      pcInput: draft.pcInput.trim(),
       minimizeToTrayOnClose: draft.minimizeToTrayOnClose,
-      wakeHotkey: draft.wakeHotkey,
-      offHotkey: draft.offHotkey,
       selectedDeviceIds,
       // Whole-map replace; the draft was seeded from disk, so entries for TVs missing from the
       // current list (temporarily unreachable) survive saves untouched. The main process carries
@@ -155,11 +147,13 @@ export function SettingsView({
       // scratch entry (the Add-a-TV tab) is never a real device — strip it.
       deviceConfigs: stripAddScratch(draft.deviceConfigs),
       theme: draft.theme,
+      // Whole-list replace, like deviceConfigs — an empty list means "all commands deleted".
+      commands: draft.commands,
     });
     if (!res.ok) return res.error || "Failed to save settings.";
     // A changed clientId/clientSecret can flip hasClient — keep the auth state in step.
     await onAuthChanged();
-    return draft.pcInput.trim() ? null : "PC input can't be empty — keeping the last saved value.";
+    return null;
   });
 
   // Which TV the "TV control" group edits: "all" = the shared input + global hotkeys (acting on
@@ -210,6 +204,12 @@ export function SettingsView({
       ),
     };
   });
+  // Command-target checkboxes: every known TV, labeled like the tabs (alias → live label →
+  // host → id). A command with no TV checked targets all enabled TVs.
+  const tvOptions = tabIds.map((id) => {
+    const cfg = form.draft.deviceConfigs[id];
+    return { value: id, label: cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id };
+  });
   // Per-TV tabs exist only once at least one TV has been paired; until then the bar is just
   // "All TVs" plus the always-present "Add a TV" tab so a first TV can be paired.
   const hasDeviceTabs = deviceTabs.length > 0;
@@ -224,15 +224,6 @@ export function SettingsView({
     activeTvTab === "all" ? undefined : form.draft.deviceConfigs[activeTvTab];
   // A cloud TV's per-TV tab hides the LAN pair/host/MAC fields — it isn't reached over the LAN.
   const activeIsCloud = cloudIds.has(activeTvTab);
-  // While a TV is enabled for All-TVs actions, the global combo already drives it — an empty
-  // per-TV hotkey field shows it as a "(shared)" placeholder (same idea as PC input) instead of
-  // reading as "no hotkey works here". Unselected TVs are NOT hit by the global pair, so they
-  // keep the plain "Disabled" prompt.
-  const sharedHotkeyPlaceholder = (accelerator: string) =>
-    form.draft.selectedDeviceIds.has(activeTvTab) && accelerator.trim()
-      ? `${accelerator.trim()} (shared)`
-      : undefined;
-
   // Pairing/discovery status for the active per-TV tab.
   const [pairing, setPairing] = useState(false);
   const [discovering, setDiscovering] = useState(false);
@@ -240,8 +231,6 @@ export function SettingsView({
   // live after a successful pair (settings are reloaded to pick up the token the main process
   // wrote outside the draft).
   const [pairedTabs, setPairedTabs] = useState<Record<string, boolean>>({});
-  const pcInputRef = useRef<HTMLInputElement>(null);
-  const deviceInputRef = useRef<HTMLInputElement>(null);
   // Cloud (Experimental) sign-in state. `oauthOpen` toggles the OAuth-client disclosure; Sign in
   // expands it (and focuses the Client ID) when no client is configured yet, else opens the popup.
   const [oauthOpen, setOauthOpen] = useState(false);
@@ -252,7 +241,6 @@ export function SettingsView({
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
-    pcInputRef.current?.focus();
     void window.tvAPI.getAppVersion().then(setAppVersion);
   }, []);
 
@@ -381,7 +369,8 @@ export function SettingsView({
               <>
                 {hasDeviceTabs && (
                   <p className="hint">
-                    These apply to the TVs enabled below. A TV's own tab can override the input.
+                    The TVs enabled below are what "All TVs" commands and the Main-screen buttons
+                    act on.
                   </p>
                 )}
                 <Field label="TVs to control">
@@ -390,40 +379,6 @@ export function SettingsView({
                     selectedIds={form.draft.selectedDeviceIds}
                     deviceConfigs={form.draft.deviceConfigs}
                     onToggle={form.toggleDevice}
-                  />
-                </Field>
-                <Field label="PC input" htmlFor="pcInput" className="input-with-hints">
-                  <TextInput
-                    id="pcInput"
-                    ref={pcInputRef}
-                    placeholder="HDMI2"
-                    value={form.draft.pcInput}
-                    onValueChange={(v) => form.set("pcInput", v)}
-                  />
-                  <HintPills
-                    hints={PC_INPUT_HINTS}
-                    onPick={(v) => {
-                      form.set("pcInput", v);
-                      pcInputRef.current?.focus();
-                    }}
-                  />
-                </Field>
-                {/* HotkeyFields keyed by tab: switching tabs must remount them so an in-progress
-                    capture can't land on another TV's binding. */}
-                <Field label="Wake TV → PC hotkey">
-                  <HotkeyField
-                    key="all-wake"
-                    value={form.draft.wakeHotkey}
-                    onChange={(v) => form.set("wakeHotkey", v)}
-                    onValidationError={form.setError}
-                  />
-                </Field>
-                <Field label="TV Off & Sleep hotkey">
-                  <HotkeyField
-                    key="all-off"
-                    value={form.draft.offHotkey}
-                    onChange={(v) => form.set("offHotkey", v)}
-                    onValidationError={form.setError}
                   />
                 </Field>
               </>
@@ -449,8 +404,8 @@ export function SettingsView({
             ) : (
               <>
                 <p className="hint">
-                  These apply only to this TV. Hotkeys here fire even when the TV isn't enabled
-                  for All-TVs actions; the same shortcut on several TVs triggers them together.
+                  These apply only to this TV. To act on it, add a command below with this TV as
+                  its target.
                 </p>
                 <SwitchField
                   id="tvSelected"
@@ -476,40 +431,6 @@ export function SettingsView({
                     placeholder="e.g. living room tv"
                     value={activeDeviceConfig?.description ?? ""}
                     onValueChange={(v) => form.setDeviceConfig(activeTvTab, "description", v)}
-                  />
-                </Field>
-                <Field label="PC input" htmlFor="tvPcInput" className="input-with-hints">
-                  <TextInput
-                    id="tvPcInput"
-                    ref={deviceInputRef}
-                    placeholder={`${form.draft.pcInput.trim() || "HDMI2"} (shared)`}
-                    value={activeDeviceConfig?.pcInput ?? ""}
-                    onValueChange={(v) => form.setDeviceConfig(activeTvTab, "pcInput", v)}
-                  />
-                  <HintPills
-                    hints={TV_PC_INPUT_HINTS}
-                    onPick={(v) => {
-                      form.setDeviceConfig(activeTvTab, "pcInput", v);
-                      deviceInputRef.current?.focus();
-                    }}
-                  />
-                </Field>
-                <Field label="Wake this TV → PC hotkey">
-                  <HotkeyField
-                    key={`${activeTvTab}-wake`}
-                    value={activeDeviceConfig?.wakeHotkey ?? ""}
-                    placeholder={sharedHotkeyPlaceholder(form.draft.wakeHotkey)}
-                    onChange={(v) => form.setDeviceConfig(activeTvTab, "wakeHotkey", v)}
-                    onValidationError={form.setError}
-                  />
-                </Field>
-                <Field label="This TV off & sleep PC hotkey">
-                  <HotkeyField
-                    key={`${activeTvTab}-off`}
-                    value={activeDeviceConfig?.offHotkey ?? ""}
-                    placeholder={sharedHotkeyPlaceholder(form.draft.offHotkey)}
-                    onChange={(v) => form.setDeviceConfig(activeTvTab, "offHotkey", v)}
-                    onValidationError={form.setError}
                   />
                 </Field>
                 {/* LAN pairing — hidden for cloud TVs, which are reached through SmartThings, not
@@ -541,6 +462,22 @@ export function SettingsView({
                 )}
               </>
             )}
+          </SettingsGroup>
+          <SettingsGroup title="Commands">
+            <p className="hint">
+              Your own commands: pick an action (and an HDMI input for the switch actions), check
+              the TVs it targets (none checked = all enabled TVs), optionally bind a hotkey, then
+              run it with ▶.
+            </p>
+            <CommandList
+              commands={form.draft.commands}
+              tvOptions={tvOptions}
+              onAdd={form.addCommand}
+              onRemove={form.removeCommand}
+              onChange={form.setCommand}
+              onValidationError={form.setError}
+              onToast={onToast}
+            />
           </SettingsGroup>
           <SettingsGroup title="Behavior">
             <Field label="Theme" className="inline">

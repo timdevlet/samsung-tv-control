@@ -1,13 +1,11 @@
-// Reusable daemon core: wires up the global hotkeys, the sleep/wake watcher, and the boot-time
-// reconcile, and exposes the two TV actions plus a stop() teardown. This is the daemon logic
+// Reusable daemon core: wires up the command hotkeys, the sleep/wake watcher, and the boot-time
+// reconcile, and exposes the TV actions plus a stop() teardown. This is the daemon logic
 // minus the tray/window plumbing — driven by the Electron app (src/electron/main.ts).
 //
-// Hotkeys are registered with Electron's globalShortcut (RegisterHotKey on Windows, a Carbon
-// hotkey on macOS): the OS matches the combo system-wide and invokes our callback directly, so
-// there's no raw key stream to parse and no event tap to keep alive across sleep.
-//
-//   Wake TV + switch to PC      macOS -> Cmd+Ctrl+E    Win/Linux -> Ctrl+Alt+E
-//   Turn TV off + sleep this PC macOS -> Cmd+Ctrl+Q    Win/Linux -> Ctrl+Alt+Q
+// Hotkeys come exclusively from the user-defined command list (Settings → Commands) and are
+// registered with Electron's globalShortcut (RegisterHotKey on Windows, a Carbon hotkey on
+// macOS): the OS matches the combo system-wide and invokes our callback directly, so there's no
+// raw key stream to parse and no event tap to keep alive across sleep.
 //
 // macOS note: a global shortcut that includes a non-system combo still works without Accessibility
 // permission (unlike the old low-level tap), but the combo must not collide with a system shortcut.
@@ -15,8 +13,6 @@
 import { globalShortcut } from "electron";
 import { createApp } from "./app.js";
 import {
-  defaultHotkeys,
-  groupHotkeyBindings,
   hotkeyLabel,
   isWithinBootWindow,
   TriggerGate,
@@ -25,7 +21,7 @@ import {
   type HotkeyTarget,
   type Platform,
 } from "./domain/daemon.js";
-import { normalizeDeviceConfigs, type DeviceConfig } from "./domain/config.js";
+import { commandLabel, normalizeCommands, type CommandConfig } from "./domain/config.js";
 import { onWake } from "./os/wake-watch.js";
 import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
 import { isMockMode } from "./dev/mock-cloud.js";
@@ -34,16 +30,6 @@ import { log, logError, useTimestamps } from "./log.js";
 
 const isMac = process.platform === "darwin";
 const PLATFORM: Platform = isMac ? "mac" : "other";
-// Default combos, used only when a hotkey was never configured (config field unset). An empty
-// string in config means the user cleared the binding — the command then has NO hotkey; it does
-// not fall back to these. Settings shows the same defaults (src/electron/settings.ts).
-const HOTKEY_DEFAULTS = defaultHotkeys(PLATFORM);
-// The tray menu labels its two action items with the live hotkey combo. Expose the platform and
-// the label renderer so main.ts can format the *current* accelerators (from getSettings) rather
-// than a compile-time constant — the earlier ON/OFF_COMBO_LABEL constants were fixed to the
-// defaults and never reflected a customized (or re-customized) combo.
-export const TRAY_PLATFORM = PLATFORM;
-export { hotkeyLabel };
 
 // No cooldown window: a new trigger may fire the instant the previous handler finishes. The gate
 // still rejects triggers *while* a handler is running, so key auto-repeat / a held combo can't
@@ -63,15 +49,18 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 export interface Daemon {
   // Wake the TV and switch it to the PC input (with the post-wake retry loop). The result is for
-  // interactive callers (the renderer's power buttons); hotkey/tray/watcher callers ignore it.
+  // interactive callers (the renderer's power buttons); tray/watcher callers ignore it.
   triggerOn(): Promise<ActionResult>;
   // Turn the TV off (only if on PC input), then put this PC to sleep. Resolves with the TV-off
   // result before the PC actually sleeps — sleepPc() runs detached (see runOff).
   triggerOffAndSleep(): Promise<ActionResult>;
   // Turn the TV off (only if on PC input) and leave this PC running.
   triggerOff(): Promise<ActionResult>;
-  // Re-read the configured hotkey combos and apply them to the live key matcher. Called after
-  // Settings saves so a changed combo takes effect without restarting the daemon.
+  // Run one user-defined command (Settings → Commands): its action against its own TV, or every
+  // selected TV when the command targets "All TVs".
+  triggerCommand(cmd: CommandConfig): Promise<ActionResult>;
+  // Re-read the command list and re-register its hotkeys. Called after Settings saves so a
+  // changed combo takes effect without restarting the daemon.
   reloadHotkeys(): Promise<void>;
   // Tear down the wake watcher and unregister the global hotkeys.
   stop(): void;
@@ -83,19 +72,14 @@ export async function startDaemon(): Promise<Daemon> {
   const app = createApp();
   const gate = new TriggerGate(COOLDOWN_MS);
 
-  // Active hotkey accelerators (Electron strings), from config or the platform defaults. Mutable so
-  // reloadHotkeys() can swap them while the daemon runs. An empty string means the action has no
-  // bound hotkey (the user cleared it) — registerHotkeys simply skips it. Declared up here so the
-  // trigger handlers below can label their logs with the live combo. deviceConfigs holds each TV's
-  // own settings (no hotkey defaults — unset means that TV has no hotkey actions).
-  let wakeAccel = HOTKEY_DEFAULTS.wake;
-  let offAccel = HOTKEY_DEFAULTS.off;
-  let deviceConfigs: Record<string, DeviceConfig> = {};
+  // The user-defined command list (Settings → Commands) — the only source of hotkeys. Reloaded
+  // by reloadHotkeys() so an edited command (or combo) takes effect without a restart.
+  let commands: CommandConfig[] = [];
 
-  // The device ids a trigger should pass to app.switch()/app.off(). undefined = legacy path (the
-  // Settings selection, resolved inside app.ts) — used by the tray/IPC/wake-watch callers that pass
-  // no target, and by the global binding when no per-device binding shares its combo. A target
-  // mixing the global binding with explicit ids unions the fresh Settings selection with them.
+  // The device ids a trigger should pass to app.switch()/app.off(). undefined = the Settings
+  // selection, resolved inside app.ts — used by the tray/IPC/wake-watch callers that pass no
+  // target and by "All TVs" commands. A target mixing includeSelected with explicit ids unions
+  // the fresh Settings selection with them.
   async function resolveTargetIds(target?: HotkeyTarget): Promise<string[] | undefined> {
     if (!target || (target.includeSelected && target.deviceIds.length === 0)) return undefined;
     if (!target.includeSelected) return target.deviceIds;
@@ -105,27 +89,32 @@ export async function startDaemon(): Promise<Daemon> {
 
   const scopeTag = (ids: string[] | undefined): string => (ids ? ` [${ids.join(", ")}]` : "");
 
-  // Wake the TV and switch it to the PC input (Cmd/Ctrl + E, on PC wake, and at boot). Retries the
-  // whole operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, on a thrown error — so a
+  // Wake the TV and switch it to the PC input (buttons/tray, on PC wake, and at boot). Retries
+  // the whole operation up to WAKE_ATTEMPTS times, WAKE_RETRY_MS apart, on a thrown error — so a
   // network stack that's still reconnecting right after the PC resumes gets several chances.
-  // `target`/`accelForLog` scope a per-device hotkey trigger; the public zero-arg calls act on the
-  // Settings selection as before. `auto` marks the daemon's own triggers (wake-on-resume, boot
+  // `target` scopes a per-TV command trigger; the public zero-arg calls act on the Settings
+  // selection as before. `auto` marks the daemon's own triggers (wake-on-resume, boot
   // reconcile) — app.switch then leaves a LAN TV whose input can't be read alone instead of
   // sending blind input keys (see SwitchOptions in src/app.ts); every user-initiated caller
-  // (hotkey, tray, renderer button) stays manual. Note: a binding whose every id is stale (TV
-  // removed from the account) makes app.switch() throw and churn this retry loop — ~30s of log
+  // (command hotkey, tray, renderer button) stays manual. Note: a command whose TV is stale
+  // (removed from the account) makes app.switch() throw and churn this retry loop — ~30s of log
   // noise, harmless.
-  async function triggerOn(target?: HotkeyTarget, accelForLog?: string, auto = false): Promise<ActionResult> {
-    const label = hotkeyLabel(accelForLog ?? wakeAccel, PLATFORM);
+  async function triggerOn(
+    target?: HotkeyTarget,
+    auto = false,
+    inputOverride?: string,
+    labelOverride?: string,
+  ): Promise<ActionResult> {
+    const label = labelOverride ?? "Wake TV → PC";
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
       return { ok: false, error: "A command is already running.", busy: true };
     }
     const ids = await resolveTargetIds(target);
-    log(`\n${label} → waking TV and switching to PC...${scopeTag(ids)}`);
+    log(`\n${label} → waking TV and switching input...${scopeTag(ids)}`);
     try {
       const acted = await withRetry(
-        () => app.switch(undefined, ids, { auto }),
+        () => app.switch(inputOverride, ids, { auto }),
         WAKE_ATTEMPTS,
         WAKE_RETRY_MS,
         sleep,
@@ -142,8 +131,8 @@ export async function startDaemon(): Promise<Daemon> {
   }
 
   // Turn the TV off; when `sleepAfter`, immediately put this PC to sleep as well. Shared by both
-  // off commands — triggerOffAndSleep (Cmd/Ctrl + Q, per-device off hotkeys) and triggerOff (TV
-  // off only). Like triggerOn, an optional target scopes a per-device hotkey to its own TVs.
+  // off actions — triggerOffAndSleep and triggerOff — and by the off commands. Like triggerOn,
+  // an optional target scopes a per-TV command to its own TV.
   async function runOff(sleepAfter: boolean, label: string, target?: HotkeyTarget): Promise<ActionResult> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
@@ -178,28 +167,67 @@ export async function startDaemon(): Promise<Daemon> {
     return result;
   }
 
-  function triggerOffAndSleep(target?: HotkeyTarget, accelForLog?: string): Promise<ActionResult> {
-    return runOff(true, hotkeyLabel(accelForLog ?? offAccel, PLATFORM), target);
+  function triggerOffAndSleep(): Promise<ActionResult> {
+    return runOff(true, "TV off + sleep");
   }
 
-  // TV off without the PC sleep — fired from the tray menu / renderer button (no hotkey binding).
+  // TV off without the PC sleep — fired from the tray menu / renderer button.
   function triggerOff(): Promise<ActionResult> {
     return runOff(false, "TV off");
   }
 
-  // Read the configured combos and update wakeAccel/offAccel/deviceConfigs. A hotkey that was
-  // never configured (field unset) gets the platform default; an empty string means the user
-  // cleared it — the command is disabled, NOT defaulted (per-device hotkeys have no defaults
-  // either way). A non-empty value is taken as-is (the capture UI only ever produces valid
-  // Electron accelerators — a bad one is caught when globalShortcut.register rejects it).
-  async function loadHotkeys(): Promise<void> {
-    const config = await loadConfig();
-    wakeAccel = config.wakeHotkey === undefined ? HOTKEY_DEFAULTS.wake : config.wakeHotkey.trim();
-    offAccel = config.offHotkey === undefined ? HOTKEY_DEFAULTS.off : config.offHotkey.trim();
-    deviceConfigs = normalizeDeviceConfigs(config.deviceConfigs);
+  // Gate-wrapped runner for the simple one-shot commands (power on / input only) — same busy
+  // rejection and no-TVs-selected result as the built-in triggers, no retry loop (these are
+  // always explicit user actions, not post-resume reconciles).
+  async function runSimple(label: string, op: () => Promise<boolean>): Promise<ActionResult> {
+    if (!gate.tryAcquire(Date.now())) {
+      log(`${label} ignored — a command is still running.`);
+      return { ok: false, error: "A command is already running.", busy: true };
+    }
+    log(`\n${label} → running...`);
+    try {
+      const acted = await op();
+      return acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
+    } catch (e) {
+      logError(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    } finally {
+      gate.release(Date.now());
+    }
   }
 
-  // (Re)register the active accelerators with the OS. unregisterAll() first so a reload doesn't
+  // Run one user-defined command against its checked TVs, or every selected TV when none are
+  // checked ("all enabled TVs"). Routed to the same underlying operations as the built-in
+  // triggers so gating/logging/results stay uniform.
+  async function triggerCommand(cmd: CommandConfig): Promise<ActionResult> {
+    const label = `Command "${commandLabel(cmd)}"`;
+    // undefined = the Settings selection; a targeted command carries its explicit ids.
+    const ids = cmd.deviceIds?.length ? cmd.deviceIds : undefined;
+    const target: HotkeyTarget | undefined = ids
+      ? { includeSelected: false, deviceIds: ids }
+      : undefined;
+    switch (cmd.action) {
+      case "tvOn":
+        return runSimple(label, () => app.powerOn(ids));
+      case "tvOff":
+        return runOff(false, label, target);
+      case "tvOffSleepPc":
+        return runOff(true, label, target);
+      case "tvOnHdmi":
+        return triggerOn(target, false, cmd.hdmi, label);
+      case "switchHdmi":
+        return runSimple(label, () => app.switchInputOnly(cmd.hdmi ?? "HDMI1", ids));
+    }
+  }
+
+  // Re-read the command list. Hotkey values are taken as-is (the capture UI only ever produces
+  // valid Electron accelerators — a bad one is caught when globalShortcut.register rejects it).
+  async function loadCommands(): Promise<void> {
+    const config = await loadConfig();
+    commands = normalizeCommands(config.commands);
+  }
+
+  // (Re)register the command hotkeys with the OS. unregisterAll() first so a reload doesn't
   // leave a stale binding behind. register() returns false (and may throw) when the accelerator is
   // malformed or already claimed by the system / another app; treat that as a non-fatal "hotkey
   // unavailable" — the daemon still auto-wakes on resume, reconciles at boot, and the tray/window
@@ -208,7 +236,6 @@ export async function startDaemon(): Promise<Daemon> {
   function registerHotkeys(): void {
     globalShortcut.unregisterAll();
     const arm = (accel: string, label: string, handler: () => void): void => {
-      if (!accel) return; // user cleared this binding
       try {
         if (!globalShortcut.register(accel, handler)) {
           logError(`Could not register ${label} hotkey "${hotkeyLabel(accel, PLATFORM)}" — it may be reserved or already in use.`);
@@ -217,21 +244,25 @@ export async function startDaemon(): Promise<Daemon> {
         logError(`Could not register ${label} hotkey "${hotkeyLabel(accel, PLATFORM)}": ${e instanceof Error ? e.message : String(e)}`);
       }
     };
-    // Each accelerator registers with the OS exactly once; everything bound to it (the global
-    // action and/or specific TVs) fires together in one trigger. A combo bound to both wake and
-    // off keeps only wake — one keypress must not wake a TV and sleep the PC at once.
-    for (const [accel, bindings] of groupHotkeyBindings(wakeAccel, offAccel, deviceConfigs)) {
-      if (bindings.wake && bindings.off) {
-        logError(`Hotkey "${hotkeyLabel(accel, PLATFORM)}" is bound to both wake and off — keeping only wake.`);
+    // Each accelerator registers with the OS exactly once. When two commands share a combo the
+    // first in list order wins and the duplicate is skipped with a warning — one keypress must
+    // not fire two commands at once.
+    const used = new Set<string>();
+    for (const cmd of commands) {
+      const accel = cmd.hotkey?.trim();
+      if (!accel) continue;
+      if (used.has(accel)) {
+        logError(
+          `Hotkey "${hotkeyLabel(accel, PLATFORM)}" is already bound — skipping it for command "${commandLabel(cmd)}".`,
+        );
+        continue;
       }
-      const wake = bindings.wake;
-      const off = bindings.off;
-      if (wake) arm(accel, "wake", () => void triggerOn(wake, accel));
-      else if (off) arm(accel, "off", () => void triggerOffAndSleep(off, accel));
+      used.add(accel);
+      arm(accel, `command "${commandLabel(cmd)}"`, () => void triggerCommand(cmd));
     }
   }
 
-  await loadHotkeys();
+  await loadCommands();
   registerHotkeys();
 
   // If the daemon started right after the machine powered on (e.g. launched as a boot/login
@@ -240,7 +271,7 @@ export async function startDaemon(): Promise<Daemon> {
   // system boot (not process start), cross-platform.
   if (isWithinBootWindow(uptimeSeconds())) {
     log("\nDaemon started near boot → waking TV if it was off...");
-    void triggerOn(undefined, undefined, true);
+    void triggerOn(undefined, true);
   }
 
   // globalShortcut registrations survive sleep/wake on their own (the OS owns them), so unlike the
@@ -248,32 +279,28 @@ export async function startDaemon(): Promise<Daemon> {
   const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
     log(`\nPC woke from sleep (~${mins} min) → waking TV if it was off...`);
-    void triggerOn(undefined, undefined, true);
+    void triggerOn(undefined, true);
   });
 
-  // Log the *active* combos (which may be user-configured); a cleared binding logs as disabled.
-  const comboLabel = (accel: string): string =>
-    accel ? hotkeyLabel(accel, PLATFORM) : "disabled (no hotkey)";
+  // Log each command hotkey so the active bindings are visible at startup and after a reload.
   function logHotkeys(): void {
-    log("TV daemon running.");
-    log(`  ${comboLabel(wakeAccel)}  → wake the TV and switch to PC`);
-    log(`  ${comboLabel(offAccel)}  → turn the TV off, then sleep this PC`);
-    log("  Auto-wakes the TV when this PC resumes from sleep.");
+    for (const cmd of commands) {
+      if (cmd.hotkey?.trim()) {
+        log(`  ${hotkeyLabel(cmd.hotkey, PLATFORM)}  → ${commandLabel(cmd)}`);
+      }
+    }
   }
+  log("TV daemon running.");
+  log("  Auto-wakes the TV when this PC resumes from sleep.");
   logHotkeys();
 
-  // Re-read config and re-register so a changed combo takes effect without restarting.
+  // Re-read the command list and re-register so a changed combo takes effect without restarting.
   async function reloadHotkeys(): Promise<void> {
-    await loadHotkeys();
+    await loadCommands();
     registerHotkeys();
-    const perDevice = Object.values(deviceConfigs).reduce(
-      (n, cfg) => n + (cfg.wakeHotkey ? 1 : 0) + (cfg.offHotkey ? 1 : 0),
-      0,
-    );
-    log(
-      `Hotkeys updated → wake: ${comboLabel(wakeAccel)}, off: ${comboLabel(offAccel)}` +
-        (perDevice ? `, plus ${perDevice} per-TV binding${perDevice === 1 ? "" : "s"}` : ""),
-    );
+    const commandKeys = commands.filter((c) => c.hotkey?.trim()).length;
+    log(`Hotkeys updated → ${commandKeys} command binding${commandKeys === 1 ? "" : "s"}.`);
+    logHotkeys();
   }
 
   function stop(): void {
@@ -281,5 +308,5 @@ export async function startDaemon(): Promise<Daemon> {
     globalShortcut.unregisterAll();
   }
 
-  return { triggerOn, triggerOffAndSleep, triggerOff, reloadHotkeys, stop };
+  return { triggerOn, triggerOffAndSleep, triggerOff, triggerCommand, reloadHotkeys, stop };
 }

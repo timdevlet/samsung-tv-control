@@ -10,7 +10,7 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startDaemon, hotkeyLabel, TRAY_PLATFORM, type Daemon } from "../daemon-core.js";
+import { startDaemon, type Daemon } from "../daemon-core.js";
 import type { ActionResult } from "../domain/daemon.js";
 import { createApp } from "../app.js";
 import { onLog, log, logError, type LogEntry } from "../log.js";
@@ -20,6 +20,7 @@ import { isMockMode, installMockCloud } from "../dev/mock-cloud.js";
 import { updateConfig } from "../config.js";
 import { discoverTVs, lookupMac } from "../api/discovery.js";
 import { pairWithTV, localDeviceId } from "../api/local-tv.js";
+import { normalizeCommands } from "../domain/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -169,22 +170,20 @@ function buildTray(): void {
   tray.on("click", () => showWindow());
 }
 
-// (Re)build the tray context menu so its two action items show the CURRENT hotkey combos. Called
-// at startup and again after Settings saves, so a changed (or cleared) combo is reflected without
-// a restart. wakeHotkey/offHotkey are the resolved accelerators from getSettings ("" = cleared,
-// which hotkeyLabel renders as "unset"). No-op if the tray isn't built yet.
-function refreshTrayMenu(wakeHotkey: string, offHotkey: string): void {
+// Build the tray context menu. Hotkeys live on user-defined commands now, so the action items
+// carry no combo suffix. No-op if the tray isn't built yet.
+function refreshTrayMenu(): void {
   if (!tray || tray.isDestroyed()) return;
   const menu = Menu.buildFromTemplate([
     { label: "Show logs", click: () => showWindow() },
     { label: "Settings…", click: () => openSettings() },
     { type: "separator" },
     {
-      label: `Wake TV + switch to PC  (${hotkeyLabel(wakeHotkey, TRAY_PLATFORM)})`,
+      label: "Wake TV + switch to PC",
       click: () => void daemon?.triggerOn(),
     },
     {
-      label: `TV off + sleep this PC  (${hotkeyLabel(offHotkey, TRAY_PLATFORM)})`,
+      label: "TV off + sleep this PC",
       click: () => void daemon?.triggerOffAndSleep(),
     },
     {
@@ -210,7 +209,7 @@ async function start(): Promise<void> {
     if (win && !win.isDestroyed()) win.setBackgroundColor(windowBackground());
   });
   buildTray();
-  refreshTrayMenu(settings.wakeHotkey, settings.offHotkey);
+  refreshTrayMenu();
   win = createWindow();
 
   // Subscribe BEFORE starting the daemon so its startup banner lands in the backlog.
@@ -231,6 +230,15 @@ async function start(): Promise<void> {
     daemon ? daemon.triggerOffAndSleep() : { ok: false, error: "Daemon is not running." });
   ipcMain.handle("action:off-only", (): Promise<ActionResult> | ActionResult =>
     daemon ? daemon.triggerOff() : { ok: false, error: "Daemon is not running." });
+  // Run a user-defined command (Settings → Commands). The renderer sends the row as shown —
+  // running the on-screen state directly means the Run button works even inside the autosave
+  // debounce. Normalized here so a malformed payload can't reach the daemon.
+  ipcMain.handle("command:run", (_e, payload: unknown): Promise<ActionResult> | ActionResult => {
+    if (!daemon) return { ok: false, error: "Daemon is not running." };
+    const [cmd] = normalizeCommands([payload]);
+    if (!cmd) return { ok: false, error: "Invalid command." };
+    return daemon.triggerCommand(cmd);
+  });
 
   // Auth: the GUI equivalent of `npm run login` / `npm run reset`. The daemon reloads config on
   // every action, so newly-saved tokens take effect on the next Wake without a restart.
@@ -328,11 +336,9 @@ async function start(): Promise<void> {
     minimizeToTrayOnClose = next.minimizeToTrayOnClose;
     // A changed theme takes effect immediately — native chrome and renderer CSS alike.
     applyTheme(next.theme);
-    // Apply changed hotkey combos to the running daemon without a restart, and relabel the tray
-    // menu's action items so they show the new combo too. Awaited so a reload failure surfaces
-    // through the invoke instead of becoming an unhandled rejection.
+    // Apply changed command hotkeys to the running daemon without a restart. Awaited so a reload
+    // failure surfaces through the invoke instead of becoming an unhandled rejection.
     await daemon?.reloadHotkeys();
-    refreshTrayMenu(next.wakeHotkey, next.offHotkey);
     return { ok: true as const };
   });
 
