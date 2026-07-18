@@ -69,7 +69,10 @@ export function parseStatus(data: RawStatus): TVStatus {
   const inputCapability = INPUT_CAPABILITIES.find((c) => main[c] != null);
   const cap = inputCapability ? main[inputCapability] : undefined;
 
-  const rawMap = (cap?.["supportedInputSourcesMap"]?.value ?? []) as { id: string; name?: string }[];
+  const rawMap = (cap?.["supportedInputSourcesMap"]?.value ?? []) as {
+    id: string;
+    name?: string;
+  }[];
   const sources: InputSource[] = rawMap.map((s) => ({
     id: String(s.id),
     name: String(s.name ?? s.id),
@@ -98,7 +101,10 @@ export function mainCapabilities(d: RawDevice): string[] {
 // True when a device looks like a TV: its main component exposes an input-switching capability
 // (either a real SmartThings one, or the LAN transport's synthetic marker).
 export function isTV(d: STDevice): boolean {
-  return d.capabilities.includes(LOCAL_INPUT_CAPABILITY) || INPUT_CAPABILITIES.some((c) => d.capabilities.includes(c));
+  return (
+    d.capabilities.includes(LOCAL_INPUT_CAPABILITY) ||
+    INPUT_CAPABILITIES.some((c) => d.capabilities.includes(c))
+  );
 }
 
 // Pick the most likely TV from a device list: input-capable, preferring a power switch.

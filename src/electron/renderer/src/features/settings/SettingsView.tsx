@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { AppSettings, AuthStatus } from "../../types";
 import { Button } from "../../components/Button";
 import { DangerZone } from "../../components/DangerZone";
 import { Disclosure } from "../../components/Disclosure";
@@ -15,6 +14,7 @@ import { TextInput } from "../../components/TextInput";
 import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { ToastKind } from "../../lib/toasts";
+import type { AppSettings, AuthStatus } from "../../types";
 import { CommandList } from "./CommandList";
 import { OAuthClientFields } from "./OAuthClientFields";
 import { TvControlList } from "./TvControlList";
@@ -220,8 +220,7 @@ export function SettingsView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices.kind]);
   // A device can disappear between list loads — never leave the panel stranded on a gone TV.
-  const activeTvId =
-    selectedTvId && knownTvIds.includes(selectedTvId) ? selectedTvId : null;
+  const activeTvId = selectedTvId && knownTvIds.includes(selectedTvId) ? selectedTvId : null;
   const activeDeviceConfig = activeTvId ? form.draft.deviceConfigs[activeTvId] : undefined;
   // A cloud TV's panel hides the LAN pair/host/MAC/key-sequence fields — it isn't reached over LAN.
   const activeIsCloud = activeTvId ? cloudIds.has(activeTvId) : false;
@@ -286,13 +285,17 @@ export function SettingsView({
     const mac = cfg?.mac?.trim() ?? "";
     if (!host) {
       form.setError(
-        isAdd ? "Enter the TV's IP address first, or use Discover." : "Enter the TV's IP address first.",
+        isAdd
+          ? "Enter the TV's IP address first, or use Discover."
+          : "Enter the TV's IP address first.",
       );
       return;
     }
     setPairing(true);
     try {
-      const res = await window.tvAPI.pairTV(isAdd ? { host, mac } : { deviceId: targetId, host, mac });
+      const res = await window.tvAPI.pairTV(
+        isAdd ? { host, mac } : { deviceId: targetId, host, mac },
+      );
       if (!res.ok) {
         form.setError(res.error || "Pairing failed.");
         return;
@@ -362,197 +365,196 @@ export function SettingsView({
 
   return (
     <ScrollArea className="modal">
-        {/* The 640px column centering targets .modal-inner > * — OverlayScrollbars owns the
+      {/* The 640px column centering targets .modal-inner > * — OverlayScrollbars owns the
             direct children of .modal, so the groups need their own wrapper. */}
-        <div className="modal-inner">
-          <SettingsGroup title="TV control">
-            <p className="hint">
-              Pick the TV to control — it's the one “All TVs” commands act on. Select it to rename
-              it, manage its connection, or run a key sequence.
-            </p>
-            {/* Two columns: the single-select TV list on the left (replaces the old tab bar);
+      <div className="modal-inner">
+        <SettingsGroup title="TV control">
+          <p className="hint">
+            Pick the TV to control — it's the one “All TVs” commands act on. Select it to rename it,
+            manage its connection, or run a key sequence.
+          </p>
+          {/* Two columns: the single-select TV list on the left (replaces the old tab bar);
                 selecting a row makes that TV the one controlled (selectedDeviceIds, collapsed to
                 it) and shows its parameters in the panel on the right. */}
-            <div className="tv-control-columns">
-              <TvControlList
-                devices={devices}
-                deviceConfigs={form.draft.deviceConfigs}
-                selectedId={activeTvId}
-                adding={addingTv}
-                onSelect={(id) => {
-                  setSelectedTvId(id);
-                  setAddingTv(false);
-                  form.selectOnlyDevice(id);
-                }}
-                onAddClick={() => {
-                  setAddingTv(true);
-                  setSelectedTvId(null);
-                }}
-              />
-              <div className="tv-control-panel">
-                {addingTv ? (
-                  <>
-                    <p className="hint">
-                      Add a TV on your network. Turn the TV on, Discover it (or enter its address),
-                      then Pair and accept the on-screen prompt. It'll then appear in the list.
-                    </p>
-                    <LanPairFields
-                      idPrefix="add"
-                      host={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
-                      mac={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
-                      onHost={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
-                      onMac={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
-                      discovering={discovering}
-                      pairing={pairing}
-                      onDiscover={() => void onDiscover()}
-                      onPair={() => void onPair(ADD_TAB)}
-                      paired={null}
-                    />
-                  </>
-                ) : activeTvId ? (
-                  <>
-                    <Field label="Name" htmlFor="tvAlias">
-                      <TextInput
-                        id="tvAlias"
-                        placeholder={
-                          devices.kind === "ready"
-                            ? devices.devices.find((d) => d.deviceId === activeTvId)?.label
-                            : undefined
-                        }
-                        value={activeDeviceConfig?.alias ?? ""}
-                        onValueChange={(v) => form.setDeviceConfig(activeTvId, "alias", v)}
-                      />
-                    </Field>
-                    <Field label="Description" htmlFor="tvDescription">
-                      <TextInput
-                        id="tvDescription"
-                        placeholder="e.g. living room tv"
-                        value={activeDeviceConfig?.description ?? ""}
-                        onValueChange={(v) => form.setDeviceConfig(activeTvId, "description", v)}
-                      />
-                    </Field>
-                    <SwitchField
-                      id="tvAutoWake"
-                      label="Turn on automatically when this PC wakes up"
-                      checked={activeDeviceConfig?.autoWake ?? true}
-                      onChange={(v) => form.setDeviceConfig(activeTvId, "autoWake", v)}
-                    />
-                    {/* LAN pairing + key sequence — hidden for cloud TVs, which are reached through
-                        SmartThings, not the local network. */}
-                    {activeIsCloud ? (
-                      <p className="hint">
-                        This TV is controlled through your SmartThings account (Cloud). Manage it in
-                        the SmartThings app; sign out under Experimental to remove the cloud TVs.
-                      </p>
-                    ) : (
-                      <>
-                        <p className="hint">
-                          Discover this TV on the network or enter its address, then Pair (turn the
-                          TV on and accept the on-screen prompt).
-                        </p>
-                        <LanPairFields
-                          idPrefix="tv"
-                          host={activeDeviceConfig?.host ?? ""}
-                          mac={activeDeviceConfig?.mac ?? ""}
-                          onHost={(v) => form.setDeviceConfig(activeTvId, "host", v)}
-                          onMac={(v) => form.setDeviceConfig(activeTvId, "mac", v)}
-                          discovering={discovering}
-                          pairing={pairing}
-                          onDiscover={() => void onDiscover()}
-                          onPair={() => void onPair(activeTvId)}
-                          paired={activePaired}
-                        />
-                        <Field label="Delay between keys (seconds, 0–5)" htmlFor="tvKeyDelay">
-                          <NumberInput
-                            id="tvKeyDelay"
-                            min={0}
-                            max={5}
-                            placeholder="0"
-                            value={activeDeviceConfig?.keyDelay ?? ""}
-                            onValueChange={(v) => form.setDeviceConfig(activeTvId, "keyDelay", v)}
-                          />
-                        </Field>
-                        <p className="hint">
-                          Extra pause between the keys of every sequence sent to this TV — for TVs
-                          whose menus need time between presses. Empty or 0 = default pacing.
-                        </p>
-                      </>
-                    )}
-                  </>
-                ) : (
+          <div className="tv-control-columns">
+            <TvControlList
+              devices={devices}
+              deviceConfigs={form.draft.deviceConfigs}
+              selectedId={activeTvId}
+              adding={addingTv}
+              onSelect={(id) => {
+                setSelectedTvId(id);
+                setAddingTv(false);
+                form.selectOnlyDevice(id);
+              }}
+              onAddClick={() => {
+                setAddingTv(true);
+                setSelectedTvId(null);
+              }}
+            />
+            <div className="tv-control-panel">
+              {addingTv ? (
+                <>
                   <p className="hint">
-                    {devices.kind === "ready" && knownTvIds.length === 0
-                      ? "Add a TV to get started — use “+ Add a TV”."
-                      : "Select a TV to configure it."}
+                    Add a TV on your network. Turn the TV on, Discover it (or enter its address),
+                    then Pair and accept the on-screen prompt. It'll then appear in the list.
                   </p>
-                )}
-              </div>
-            </div>
-          </SettingsGroup>
-          <SettingsGroup title="Commands">
-            <p className="hint">
-              Your own commands: pick the TV it targets. A cloud TV runs an action
-              (and an HDMI input for the switch actions); a LAN TV runs a key sequence you type
-              instead. Optionally bind a hotkey, then run it with ▶. Toggle the eye to add it as a
-              button on the Main screen.
-            </p>
-            <CommandList
-              commands={form.draft.commands}
-              tvChoices={tvChoices}
-              onAdd={form.addCommand}
-              onRemove={form.removeCommand}
-              onChange={form.setCommand}
-              onValidationError={form.setError}
-              onToast={onToast}
-            />
-          </SettingsGroup>
-          <SettingsGroup title="Behavior">
-            <Field label="Theme" className="inline">
-              <SegmentedControl
-                ariaLabel="Theme"
-                value={form.draft.theme}
-                options={THEME_OPTIONS}
-                onChange={(v) => form.set("theme", v)}
-              />
-            </Field>
-            <SwitchField
-              id="minimizeToTray"
-              label="Hide to tray on close (keep running in the background)"
-              checked={form.draft.minimizeToTrayOnClose}
-              onChange={(v) => form.set("minimizeToTrayOnClose", v)}
-            />
-          </SettingsGroup>
-          <SettingsGroup title="Experimental">
-            <p className="hint">
-              Cloud control via SmartThings — sign in to list and control the TVs on your Samsung
-              account alongside your local TVs. Cloud TVs are marked with a “Cloud” badge.
-            </p>
-            {isAuthorized ? (
-              <DangerZone description="Signed in to SmartThings. Sign out to clear the stored tokens and remove the cloud TVs (your local TVs stay).">
-                <Button variant="danger" onClick={() => void onSignOut()}>
-                  Sign out
-                </Button>
-              </DangerZone>
-            ) : (
-              <>
-                <Button onClick={() => void onSignIn()} disabled={signingIn}>
-                  {signingIn ? "Waiting for approval…" : "Sign in with SmartThings"}
-                </Button>
-                <Disclosure summary="OAuth client" open={oauthOpen} onToggle={setOauthOpen}>
-                  <OAuthClientFields
-                    clientId={form.draft.clientId}
-                    clientSecret={form.draft.clientSecret}
-                    redirectUri={form.draft.redirectUri}
-                    onChange={form.set}
-                    clientIdRef={clientIdRef}
+                  <LanPairFields
+                    idPrefix="add"
+                    host={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
+                    mac={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
+                    onHost={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
+                    onMac={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
+                    discovering={discovering}
+                    pairing={pairing}
+                    onDiscover={() => void onDiscover()}
+                    onPair={() => void onPair(ADD_TAB)}
+                    paired={null}
                   />
-                </Disclosure>
-              </>
-            )}
-          </SettingsGroup>
-          <ErrorText>{form.error}</ErrorText>
-          {appVersion && <p className="app-version">Version {appVersion}</p>}
-        </div>
+                </>
+              ) : activeTvId ? (
+                <>
+                  <Field label="Name" htmlFor="tvAlias">
+                    <TextInput
+                      id="tvAlias"
+                      placeholder={
+                        devices.kind === "ready"
+                          ? devices.devices.find((d) => d.deviceId === activeTvId)?.label
+                          : undefined
+                      }
+                      value={activeDeviceConfig?.alias ?? ""}
+                      onValueChange={(v) => form.setDeviceConfig(activeTvId, "alias", v)}
+                    />
+                  </Field>
+                  <Field label="Description" htmlFor="tvDescription">
+                    <TextInput
+                      id="tvDescription"
+                      placeholder="e.g. living room tv"
+                      value={activeDeviceConfig?.description ?? ""}
+                      onValueChange={(v) => form.setDeviceConfig(activeTvId, "description", v)}
+                    />
+                  </Field>
+                  <SwitchField
+                    id="tvAutoWake"
+                    label="Turn on automatically when this PC wakes up"
+                    checked={activeDeviceConfig?.autoWake ?? true}
+                    onChange={(v) => form.setDeviceConfig(activeTvId, "autoWake", v)}
+                  />
+                  {/* LAN pairing + key sequence — hidden for cloud TVs, which are reached through
+                        SmartThings, not the local network. */}
+                  {activeIsCloud ? (
+                    <p className="hint">
+                      This TV is controlled through your SmartThings account (Cloud). Manage it in
+                      the SmartThings app; sign out under Experimental to remove the cloud TVs.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="hint">
+                        Discover this TV on the network or enter its address, then Pair (turn the TV
+                        on and accept the on-screen prompt).
+                      </p>
+                      <LanPairFields
+                        idPrefix="tv"
+                        host={activeDeviceConfig?.host ?? ""}
+                        mac={activeDeviceConfig?.mac ?? ""}
+                        onHost={(v) => form.setDeviceConfig(activeTvId, "host", v)}
+                        onMac={(v) => form.setDeviceConfig(activeTvId, "mac", v)}
+                        discovering={discovering}
+                        pairing={pairing}
+                        onDiscover={() => void onDiscover()}
+                        onPair={() => void onPair(activeTvId)}
+                        paired={activePaired}
+                      />
+                      <Field label="Delay between keys (seconds, 0–5)" htmlFor="tvKeyDelay">
+                        <NumberInput
+                          id="tvKeyDelay"
+                          min={0}
+                          max={5}
+                          placeholder="0"
+                          value={activeDeviceConfig?.keyDelay ?? ""}
+                          onValueChange={(v) => form.setDeviceConfig(activeTvId, "keyDelay", v)}
+                        />
+                      </Field>
+                      <p className="hint">
+                        Extra pause between the keys of every sequence sent to this TV — for TVs
+                        whose menus need time between presses. Empty or 0 = default pacing.
+                      </p>
+                    </>
+                  )}
+                </>
+              ) : (
+                <p className="hint">
+                  {devices.kind === "ready" && knownTvIds.length === 0
+                    ? "Add a TV to get started — use “+ Add a TV”."
+                    : "Select a TV to configure it."}
+                </p>
+              )}
+            </div>
+          </div>
+        </SettingsGroup>
+        <SettingsGroup title="Commands">
+          <p className="hint">
+            Your own commands: pick the TV it targets. A cloud TV runs an action (and an HDMI input
+            for the switch actions); a LAN TV runs a key sequence you type instead. Optionally bind
+            a hotkey, then run it with ▶. Toggle the eye to add it as a button on the Main screen.
+          </p>
+          <CommandList
+            commands={form.draft.commands}
+            tvChoices={tvChoices}
+            onAdd={form.addCommand}
+            onRemove={form.removeCommand}
+            onChange={form.setCommand}
+            onValidationError={form.setError}
+            onToast={onToast}
+          />
+        </SettingsGroup>
+        <SettingsGroup title="Behavior">
+          <Field label="Theme" className="inline">
+            <SegmentedControl
+              ariaLabel="Theme"
+              value={form.draft.theme}
+              options={THEME_OPTIONS}
+              onChange={(v) => form.set("theme", v)}
+            />
+          </Field>
+          <SwitchField
+            id="minimizeToTray"
+            label="Hide to tray on close (keep running in the background)"
+            checked={form.draft.minimizeToTrayOnClose}
+            onChange={(v) => form.set("minimizeToTrayOnClose", v)}
+          />
+        </SettingsGroup>
+        <SettingsGroup title="Experimental">
+          <p className="hint">
+            Cloud control via SmartThings — sign in to list and control the TVs on your Samsung
+            account alongside your local TVs. Cloud TVs are marked with a “Cloud” badge.
+          </p>
+          {isAuthorized ? (
+            <DangerZone description="Signed in to SmartThings. Sign out to clear the stored tokens and remove the cloud TVs (your local TVs stay).">
+              <Button variant="danger" onClick={() => void onSignOut()}>
+                Sign out
+              </Button>
+            </DangerZone>
+          ) : (
+            <>
+              <Button onClick={() => void onSignIn()} disabled={signingIn}>
+                {signingIn ? "Waiting for approval…" : "Sign in with SmartThings"}
+              </Button>
+              <Disclosure summary="OAuth client" open={oauthOpen} onToggle={setOauthOpen}>
+                <OAuthClientFields
+                  clientId={form.draft.clientId}
+                  clientSecret={form.draft.clientSecret}
+                  redirectUri={form.draft.redirectUri}
+                  onChange={form.set}
+                  clientIdRef={clientIdRef}
+                />
+              </Disclosure>
+            </>
+          )}
+        </SettingsGroup>
+        <ErrorText>{form.error}</ErrorText>
+        {appVersion && <p className="app-version">Version {appVersion}</p>}
+      </div>
     </ScrollArea>
   );
 }

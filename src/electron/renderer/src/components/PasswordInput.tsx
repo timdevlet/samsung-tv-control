@@ -1,7 +1,7 @@
-import { useState } from "react";
 import type { InputHTMLAttributes, Ref } from "react";
-import { TextInput } from "./TextInput";
+import { useState } from "react";
 import { IconButton } from "./IconButton";
+import { TextInput } from "./TextInput";
 import "./PasswordInput.scss";
 
 type PasswordInputProps = {

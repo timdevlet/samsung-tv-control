@@ -1,14 +1,14 @@
 import { useState } from "react";
-import type { CommandAction, CommandSettings } from "../../types";
 import { Button } from "../../components/Button";
+import { GroupSelect } from "../../components/GroupSelect";
 import { HotkeyField } from "../../components/HotkeyField";
 import { IconButton } from "../../components/IconButton";
-import { GroupSelect } from "../../components/GroupSelect";
+import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
 import { SelectMenu, type SelectMenuOption } from "../../components/SelectMenu";
 import { TextInput } from "../../components/TextInput";
-import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
-import { REMOTE_KEY_GROUPS, appendKeyToken } from "../../lib/remoteKeys";
+import { appendKeyToken, REMOTE_KEY_GROUPS } from "../../lib/remoteKeys";
 import type { ToastKind } from "../../lib/toasts";
+import type { CommandAction, CommandSettings } from "../../types";
 import "./CommandList.scss";
 
 const ACTION_OPTIONS: readonly { value: CommandAction; label: string }[] = [
@@ -81,7 +81,8 @@ export function CommandList({
       return { value: c.deviceId, label };
     });
     const current = cmd.deviceIds[0];
-    if (current && !choiceById.has(current)) opts.push({ value: current, label: `${current} (gone)` });
+    if (current && !choiceById.has(current))
+      opts.push({ value: current, label: `${current} (gone)` });
     return opts;
   };
 
@@ -90,11 +91,13 @@ export function CommandList({
     try {
       const result = await window.tvAPI.runCommand(cmd);
       const target = cmd.deviceIds[0];
-      const isKeySeq = target ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:")) : false;
+      const isKeySeq = target
+        ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:"))
+        : false;
       const what = isKeySeq
         ? `Keys (${choiceById.get(target!)?.label ?? target})`
-        : ACTION_OPTIONS.find((o) => o.value === cmd.action)?.label ?? cmd.action;
-      const tvs = target ? choiceById.get(target)?.label ?? target : "all TVs";
+        : (ACTION_OPTIONS.find((o) => o.value === cmd.action)?.label ?? cmd.action);
+      const tvs = target ? (choiceById.get(target)?.label ?? target) : "all TVs";
       if (result.ok) onToast("success", `${what} (${tvs}) — done`);
       else onToast("error", result.error || "Command failed");
     } finally {
@@ -124,14 +127,18 @@ export function CommandList({
   return (
     <div className="command-list">
       {commands.length === 0 && (
-        <p className="hint">No commands yet — add one to run it from here or bind it to a hotkey.</p>
+        <p className="hint">
+          No commands yet — add one to run it from here or bind it to a hotkey.
+        </p>
       )}
       {commands.map((cmd) => {
         const target = cmd.deviceIds[0];
         // A LAN target runs a key sequence instead of an action. Fall back to the id prefix if the
         // TV isn't in the current choice list (e.g. temporarily unreachable) so the row shape is
         // stable regardless of list load state.
-        const isKeySeq = target ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:")) : false;
+        const isKeySeq = target
+          ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:"))
+          : false;
         const hdmiEnabled = !isKeySeq && usesHdmi(cmd.action);
         return (
           <div className="command-item" key={cmd.id}>
@@ -161,7 +168,9 @@ export function CommandList({
                     ariaLabel="Add a remote key to the sequence"
                     triggerLabel="Add key"
                     groups={REMOTE_KEY_GROUPS}
-                    onSelect={(token) => onChange(cmd.id, { keySeq: appendKeyToken(cmd.keySeq, token) })}
+                    onSelect={(token) =>
+                      onChange(cmd.id, { keySeq: appendKeyToken(cmd.keySeq, token) })
+                    }
                   />
                 </>
               ) : (

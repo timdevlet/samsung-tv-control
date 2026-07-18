@@ -5,16 +5,22 @@
 // reloads config + rebuilds the client), so a long-running daemon picks up token
 // refreshes rather than holding a stale client.
 
-import { loadConfig, resolveToken, type TVConfig } from "./config.js";
-import { autoWakeEnabled } from "./domain/config.js";
-import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
-import { pickInput, isOnInput, isTV } from "./domain/tv.js";
-import { SmartThings } from "./api/smartthings.js";
 import { LocalTV, normalizeRemoteKey } from "./api/local-tv.js";
+import {
+  authorizeUrl,
+  DEFAULT_REDIRECT_URI,
+  exchangeCode,
+  getAccessToken,
+  hasOAuthClient,
+} from "./api/oauth.js";
+import { SmartThings } from "./api/smartthings.js";
 import type { TVTransport } from "./api/transport.js";
+import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { isMockMode } from "./dev/mock-cloud.js";
 import { makeMockTransport } from "./dev/mock-transport.js";
-import type { TVStatus, STDevice } from "./domain/tv.js";
+import { autoWakeEnabled } from "./domain/config.js";
+import type { STDevice, TVStatus } from "./domain/tv.js";
+import { isOnInput, isTV, pickInput } from "./domain/tv.js";
 import { log, logError } from "./log.js";
 
 // Power-on retry loop: (re)send switch:on, wait, re-read status, up to POWER_ON_ATTEMPTS times,
@@ -87,7 +93,9 @@ class RoutingTransport implements TVTransport {
     try {
       cloud = await (await this.cloud()).listDevices();
     } catch (err) {
-      log(`Cloud device list unavailable (${err instanceof Error ? err.message : String(err)}) — showing local TVs only.`);
+      log(
+        `Cloud device list unavailable (${err instanceof Error ? err.message : String(err)}) — showing local TVs only.`,
+      );
     }
     return [...local, ...cloud];
   }
@@ -143,7 +151,7 @@ export function createApp(): App {
     }
     throw new Error(
       "No SmartThings credentials. Either run `npm run login` (OAuth, auto-refreshing) after adding " +
-        "\"clientId\"/\"clientSecret\" to smartthings-config.json, or set SMARTTHINGS_TOKEN=<token>.",
+        '"clientId"/"clientSecret" to smartthings-config.json, or set SMARTTHINGS_TOKEN=<token>.',
     );
   }
 
@@ -164,7 +172,9 @@ export function createApp(): App {
   }
 
   // DI core: load config, build the transport (which resolves a token only in cloud mode).
-  async function connect(inputOverride?: string): Promise<{ config: TVConfig; transport: TVTransport }> {
+  async function connect(
+    inputOverride?: string,
+  ): Promise<{ config: TVConfig; transport: TVTransport }> {
     const config = await loadConfig();
     if (inputOverride) config.pcInput = inputOverride;
     const transport = await buildTransport(config);
@@ -192,7 +202,9 @@ export function createApp(): App {
     const results = await Promise.allSettled(ids.map((id) => op(id)));
     results.forEach((r, i) => {
       if (r.status === "rejected") {
-        logError(`TV ${ids[i]} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`);
+        logError(
+          `TV ${ids[i]} failed: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+        );
       }
     });
     const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
@@ -210,7 +222,12 @@ export function createApp(): App {
   // — the TV needs a moment to come up after waking, and it only exposes its input-source map
   // once on. We return as soon as it reports `on`. If it never does we still return — the caller
   // logs and the input switch is attempted regardless.
-  async function ensurePoweredOn(transport: TVTransport, deviceId: string, status: TVStatus, tag: string): Promise<TVStatus> {
+  async function ensurePoweredOn(
+    transport: TVTransport,
+    deviceId: string,
+    status: TVStatus,
+    tag: string,
+  ): Promise<TVStatus> {
     for (let attempt = 1; status.power !== "on" && attempt <= POWER_ON_ATTEMPTS; attempt++) {
       log(`${tag}TV is off — turning it on (attempt ${attempt}/${POWER_ON_ATTEMPTS})...`);
       await transport.powerOn(deviceId);
@@ -218,7 +235,10 @@ export function createApp(): App {
       status = await transport.getStatus(deviceId);
     }
     if (status.power === "on") log(`${tag}TV is on.`);
-    else log(`${tag}TV still reports off after ${POWER_ON_ATTEMPTS} attempts — it may be unreachable by the cloud (deep standby).`);
+    else
+      log(
+        `${tag}TV still reports off after ${POWER_ON_ATTEMPTS} attempts — it may be unreachable by the cloud (deep standby).`,
+      );
     return status;
   }
 
@@ -252,19 +272,25 @@ export function createApp(): App {
   async function login(): Promise<void> {
     const config = await loadConfig();
     if (!hasOAuthClient(config)) {
-      throw new Error('Add your OAuth "clientId" and "clientSecret" to smartthings-config.json first.');
+      throw new Error(
+        'Add your OAuth "clientId" and "clientSecret" to smartthings-config.json first.',
+      );
     }
 
     log("\n1) Open this URL in your browser (logged into your Samsung account) and approve:\n");
     log("   " + authorizeUrl(config) + "\n");
-    log(`2) You'll be redirected to ${config.redirectUri ?? DEFAULT_REDIRECT_URI} with ?code=... in the URL.`);
+    log(
+      `2) You'll be redirected to ${config.redirectUri ?? DEFAULT_REDIRECT_URI} with ?code=... in the URL.`,
+    );
     log("   Copy the value of the `code` query parameter and paste it below.\n");
 
     const code = await prompt("Paste code: ");
     if (!code) throw new Error("No code entered.");
 
     await exchangeCode(config, code);
-    log("\n✅ Authorized. Tokens saved to smartthings-config.json — they now refresh automatically.");
+    log(
+      "\n✅ Authorized. Tokens saved to smartthings-config.json — they now refresh automatically.",
+    );
     log("   Run `npm start` to wake the TV and switch to PC.\n");
   }
 
@@ -298,10 +324,14 @@ export function createApp(): App {
     const inputKnown = Boolean(status.currentInput) || status.sources.length > 0;
     if (!inputKnown && wasOn) {
       if (auto) {
-        log(`${tag}TV was already on and its input can't be read over this connection — leaving the input unchanged.`);
+        log(
+          `${tag}TV was already on and its input can't be read over this connection — leaving the input unchanged.`,
+        );
         return;
       }
-      log(`${tag}The current input can't be read over this connection — sending the input keys anyway.`);
+      log(
+        `${tag}The current input can't be read over this connection — sending the input keys anyway.`,
+      );
     }
 
     const target = pickInput(status, pcInput);
@@ -315,7 +345,13 @@ export function createApp(): App {
 
   // Switch one TV to its PC input, powering it on first if needed. `auto` = triggered by the
   // daemon itself (resume/boot), not an explicit user action — see SwitchOptions.
-  async function switchOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string, auto: boolean): Promise<void> {
+  async function switchOne(
+    transport: TVTransport,
+    deviceId: string,
+    pcInput: string,
+    tag: string,
+    auto: boolean,
+  ): Promise<void> {
     // 1) Check status first; if off, wake it before switching input. We re-read after waking
     // because the off-state status often doesn't include the input-source map.
     let status = await transport.getStatus(deviceId);
@@ -345,7 +381,12 @@ export function createApp(): App {
   }
 
   // Switch one TV's input only if it's already on; an off TV is deliberately left off.
-  async function inputOnlyOne(transport: TVTransport, deviceId: string, input: string, tag: string): Promise<void> {
+  async function inputOnlyOne(
+    transport: TVTransport,
+    deviceId: string,
+    input: string,
+    tag: string,
+  ): Promise<void> {
     const status = await transport.getStatus(deviceId);
     if (status.power !== "on") {
       log(`${tag}TV is off — not switching its input (use a "TV on + input" command to wake it).`);
@@ -357,7 +398,11 @@ export function createApp(): App {
   }
 
   // Switch every targeted TV to its PC input, powering each on first if needed.
-  async function switchInput(inputOverride?: string, deviceIds?: string[], opts?: SwitchOptions): Promise<boolean> {
+  async function switchInput(
+    inputOverride?: string,
+    deviceIds?: string[],
+    opts?: SwitchOptions,
+  ): Promise<boolean> {
     const { config, transport } = await connect(inputOverride);
     const ids = deviceIds ?? resolveDeviceIds(config);
     // An automatic trigger (resume/boot) honors each TV's autoWake opt-out; a user action never
@@ -368,7 +413,9 @@ export function createApp(): App {
       targetIds = ids.filter((id) => autoWakeEnabled(config.deviceConfigs?.[id]));
       for (const id of ids) {
         if (!targetIds.includes(id)) {
-          log(`[${config.deviceConfigs?.[id]?.alias || id}] Automatic power-on is off for this TV — leaving it alone.`);
+          log(
+            `[${config.deviceConfigs?.[id]?.alias || id}] Automatic power-on is off for this TV — leaving it alone.`,
+          );
         }
       }
       if (targetIds.length === 0 && ids.length > 0) {
@@ -411,7 +458,12 @@ export function createApp(): App {
       config,
       transport,
       (deviceId) =>
-        inputOnlyOne(transport, deviceId, inputFor(config, deviceId, input), deviceTag(config, deviceId, ids)),
+        inputOnlyOne(
+          transport,
+          deviceId,
+          inputFor(config, deviceId, input),
+          deviceTag(config, deviceId, ids),
+        ),
       deviceIds,
     );
   }
@@ -429,7 +481,12 @@ export function createApp(): App {
   }
 
   // Turn one TV off, but only when it's currently on its PC input.
-  async function offOne(transport: TVTransport, deviceId: string, pcInput: string, tag: string): Promise<void> {
+  async function offOne(
+    transport: TVTransport,
+    deviceId: string,
+    pcInput: string,
+    tag: string,
+  ): Promise<void> {
     const status = await transport.getStatus(deviceId);
 
     if (status.power === "off") {
@@ -445,7 +502,9 @@ export function createApp(): App {
     const inputKnown = Boolean(status.currentInput) || status.sources.length > 0;
     const pcSource = pickInput(status, pcInput);
     if (inputKnown && !isOnInput(status, pcSource)) {
-      log(`${tag}TV input is "${status.currentInput ?? "?"}", not PC (${pcSource}) — leaving it on.`);
+      log(
+        `${tag}TV input is "${status.currentInput ?? "?"}", not PC (${pcSource}) — leaving it on.`,
+      );
       return;
     }
     if (!inputKnown) {
@@ -465,7 +524,8 @@ export function createApp(): App {
     return forEachSelected(
       config,
       transport,
-      (deviceId) => offOne(transport, deviceId, inputFor(config, deviceId), deviceTag(config, deviceId, ids)),
+      (deviceId) =>
+        offOne(transport, deviceId, inputFor(config, deviceId), deviceTag(config, deviceId, ids)),
       deviceIds,
     );
   }
@@ -494,5 +554,14 @@ export function createApp(): App {
   }
 
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.
-  return { login, switch: switchInput, off, powerOn, switchInputOnly, sendKeys, listDevices, listTVs };
+  return {
+    login,
+    switch: switchInput,
+    off,
+    powerOn,
+    switchInputOnly,
+    sendKeys,
+    listDevices,
+    listTVs,
+  };
 }

@@ -1,6 +1,6 @@
-import { useId, type ReactNode } from "react";
-import { ToggleSwitch } from "./ToggleSwitch";
+import { type ReactNode, useId } from "react";
 import { selectionState } from "../lib/multiselect";
+import { ToggleSwitch } from "./ToggleSwitch";
 import "./MultiSelectList.scss";
 
 export type MultiSelectOption = {
@@ -61,11 +61,7 @@ export function MultiSelectList({
           <span className="multiselect-text">
             <span className="multiselect-label">(Select all)</span>
           </span>
-          <ToggleSwitch
-            checked={allChecked}
-            onChange={toggleAll}
-            aria-label="Select all"
-          />
+          <ToggleSwitch checked={allChecked} onChange={toggleAll} aria-label="Select all" />
         </div>
       ) : (
         <label className="multiselect-option multiselect-all" htmlFor={allId}>
@@ -96,11 +92,7 @@ export function MultiSelectList({
         return isToggle ? (
           <label key={o.value} className="multiselect-option" htmlFor={id}>
             {text}
-            <ToggleSwitch
-              id={id}
-              checked={checked}
-              onChange={(next) => onChange(o.value, next)}
-            />
+            <ToggleSwitch id={id} checked={checked} onChange={(next) => onChange(o.value, next)} />
           </label>
         ) : (
           <label key={o.value} className="multiselect-option" htmlFor={id}>

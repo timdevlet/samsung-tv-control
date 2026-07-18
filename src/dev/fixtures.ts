@@ -1,8 +1,8 @@
 // Mock SmartThings payloads for dev mode (src/dev/mock-cloud.ts) and tests. Typed as the raw
 // wire shapes from src/domain/tv.ts so `tsc` catches drift between the fake and the real parser.
 
+import type { InputSource, RawDevice, RawStatus } from "../domain/tv.js";
 import { LOCAL_INPUT_CAPABILITY } from "../domain/tv.js";
-import type { RawDevice, RawStatus, InputSource } from "../domain/tv.js";
 
 // The source list a mock TV reports once it's on. Includes the HDMI2/"PC" entry the default
 // config targets, plus a couple of extras so the Settings input list looks like a real TV's.
@@ -36,9 +36,7 @@ export const MOCK_DEVICES: RawDevice[] = [
     deviceId: "mock-tv-2",
     label: "Bedroom TV",
     name: "Samsung The Frame (55)",
-    components: [
-      { id: "main", capabilities: [{ id: "switch" }, { id: "mediaInputSource" }] },
-    ],
+    components: [{ id: "main", capabilities: [{ id: "switch" }, { id: "mediaInputSource" }] }],
   },
   {
     deviceId: MOCK_LOCAL_DEVICE_ID,

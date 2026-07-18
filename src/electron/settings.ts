@@ -5,18 +5,18 @@
 // config.ts does the actual persistence, so this writes the same smartthings-config.json the
 // rest of the app reads.
 
-import { loadConfig, updateConfig, type TVConfig } from "../config.js";
+import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
+import { loadConfig, type TVConfig, updateConfig } from "../config.js";
 import {
+  type CommandAction,
   commandIsKeySeq,
   commandUsesHdmi,
   normalizeCommands,
   normalizeDeviceConfigs,
   normalizeTheme,
   THEME_PREFERENCES,
-  type CommandAction,
   type ThemePreference,
 } from "../domain/config.js";
-import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
 
 export interface AppSettings {
   // OAuth client id from your SmartThings OAuth-In app.
@@ -110,8 +110,8 @@ export async function getSettings(): Promise<AppSettings> {
       deviceIds: cmd.deviceIds ?? [],
       // hdmi applies to a cloud switch action; keySeq to a LAN target. They're mutually exclusive
       // (a command targets one TV, which is one or the other).
-      hdmi: !commandIsKeySeq(cmd) && commandUsesHdmi(cmd.action) ? cmd.hdmi ?? "HDMI1" : "",
-      keySeq: commandIsKeySeq(cmd) ? cmd.keySeq ?? "" : "",
+      hdmi: !commandIsKeySeq(cmd) && commandUsesHdmi(cmd.action) ? (cmd.hdmi ?? "HDMI1") : "",
+      keySeq: commandIsKeySeq(cmd) ? (cmd.keySeq ?? "") : "",
       hotkey: cmd.hotkey ?? "",
       pinned: cmd.pinned ?? false,
     })),

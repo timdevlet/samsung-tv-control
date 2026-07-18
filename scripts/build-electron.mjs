@@ -7,12 +7,12 @@
 // whole import graph (app/daemon/domain/os) into two self-contained .cjs files. `electron` itself
 // stays external (provided by the runtime, not inlined).
 
-import esbuild from "esbuild";
-import { mkdir, copyFile, writeFile, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import zlib from "node:zlib";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import zlib from "node:zlib";
+import esbuild from "esbuild";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const out = path.join(root, "dist-electron");
@@ -186,7 +186,10 @@ function decodePNG(buf) {
   // expand whatever color type we got into straight RGBA
   const rgba = Buffer.alloc(width * height * 4);
   for (let p = 0; p < width * height; p++) {
-    let r, g, b, a = 255;
+    let r,
+      g,
+      b,
+      a = 255;
     if (colorType === 2) [r, g, b] = [out[p * 3], out[p * 3 + 1], out[p * 3 + 2]];
     else if (colorType === 6)
       [r, g, b, a] = [out[p * 4], out[p * 4 + 1], out[p * 4 + 2], out[p * 4 + 3]];
@@ -210,7 +213,9 @@ function keyOutWhite(rgba) {
   const WHITE = 250; // channel value at/above which a pixel is considered background
   const RANGE = 12; // how many levels below WHITE fade from transparent to opaque
   for (let p = 0; p < rgba.length; p += 4) {
-    const r = rgba[p], g = rgba[p + 1], b = rgba[p + 2];
+    const r = rgba[p],
+      g = rgba[p + 1],
+      b = rgba[p + 2];
     // distance from white = how dark the least-white channel is (max keeps colored edges opaque)
     const dist = WHITE - Math.min(r, g, b);
     if (dist <= 0) rgba[p + 3] = 0;
@@ -230,7 +235,11 @@ function resizeRGBA(src, sw, sh, size) {
     for (let dx = 0; dx < size; dx++) {
       const sx0 = Math.floor((dx * sw) / size);
       const sx1 = Math.max(sx0 + 1, Math.floor(((dx + 1) * sw) / size));
-      let r = 0, g = 0, b = 0, aSum = 0, n = 0;
+      let r = 0,
+        g = 0,
+        b = 0,
+        aSum = 0,
+        n = 0;
       for (let sy = sy0; sy < sy1; sy++) {
         for (let sx = sx0; sx < sx1; sx++) {
           const i = (sy * sw + sx) * 4;
@@ -293,7 +302,12 @@ async function generateIcons() {
   // Windows tray variants are pre-rendered standing files (gray, light->dark gradient) committed in
   // assets/tray/ — copied as-is, not generated at build time. 16/24/32/48px cover 100/150/200/300%
   // display scaling; Electron auto-loads @2x/@3x by name, while main.ts attaches the 1.5x rep.
-  for (const name of ["tray-white.png", "tray-white@1.5x.png", "tray-white@2x.png", "tray-white@3x.png"]) {
+  for (const name of [
+    "tray-white.png",
+    "tray-white@1.5x.png",
+    "tray-white@2x.png",
+    "tray-white@3x.png",
+  ]) {
     await copyFile(path.join(root, "assets", "tray", name), path.join(out, name));
   }
 }

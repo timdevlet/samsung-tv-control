@@ -1,7 +1,7 @@
-import { parseStatus, mainCapabilities } from "../domain/tv.js";
-import type { STDevice, TVStatus, RawStatus, RawDevice } from "../domain/tv.js";
-import type { TVTransport } from "./transport.js";
+import type { RawDevice, RawStatus, STDevice, TVStatus } from "../domain/tv.js";
+import { mainCapabilities, parseStatus } from "../domain/tv.js";
 import { log } from "../log.js";
+import type { TVTransport } from "./transport.js";
 
 const BASE = "https://api.smartthings.com/v1";
 
@@ -11,7 +11,8 @@ const BASE = "https://api.smartthings.com/v1";
 export function fetchErrorDetail(err: unknown): string {
   const cause = (err as { cause?: { code?: string } }).cause;
   if (cause?.code) return cause.code;
-  if (err instanceof Error) return err.name === "Error" ? err.message : `${err.name}: ${err.message}`;
+  if (err instanceof Error)
+    return err.name === "Error" ? err.message : `${err.name}: ${err.message}`;
   return String(err);
 }
 
@@ -47,7 +48,9 @@ export class SmartThings implements TVTransport {
     // is multiple KB of JSON we don't want dumped on every call. On failure we include a short slice
     // of the body, which is where the error message lives.
     const body = await res.text().catch(() => "");
-    log(`SmartThings API ${method} ${path} → ${res.status} ${res.ok ? "ok" : body.slice(0, 200) || "(empty)"}`);
+    log(
+      `SmartThings API ${method} ${path} → ${res.status} ${res.ok ? "ok" : body.slice(0, 200) || "(empty)"}`,
+    );
     if (!res.ok) {
       if (res.status === 401) {
         throw new Error(

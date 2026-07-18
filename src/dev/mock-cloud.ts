@@ -7,8 +7,8 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { CONFIG_PATH } from "../config.js";
-import { INPUT_CAPABILITIES, mainCapabilities } from "../domain/tv.js";
 import type { RawDevice, RawStatus } from "../domain/tv.js";
+import { INPUT_CAPABILITIES, mainCapabilities } from "../domain/tv.js";
 import {
   MOCK_DEVICES,
   MOCK_LOCAL_DEVICE_ID,
@@ -109,7 +109,8 @@ export class FakeCloud {
     devicesOrState: RawDevice[] | FakeTVState = MOCK_DEVICES,
     private readonly latencyMs: () => number = () => 150 + Math.random() * 200,
   ) {
-    this.tvState = devicesOrState instanceof FakeTVState ? devicesOrState : new FakeTVState(devicesOrState);
+    this.tvState =
+      devicesOrState instanceof FakeTVState ? devicesOrState : new FakeTVState(devicesOrState);
   }
 
   // Route a request the way the real cloud would. Only the three paths the SmartThings client

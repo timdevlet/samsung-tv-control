@@ -159,15 +159,7 @@ export function HdmiIcon({ size = 16 }: { size?: number }) {
 export function KeysIcon({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <rect
-        x="8"
-        y="3"
-        width="8"
-        height="18"
-        rx="2.5"
-        stroke="currentColor"
-        strokeWidth="2"
-      />
+      <rect x="8" y="3" width="8" height="18" rx="2.5" stroke="currentColor" strokeWidth="2" />
       <path
         d="M12 7h.01M12 11h.01M12 15h.01"
         stroke="currentColor"

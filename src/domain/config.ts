@@ -162,7 +162,10 @@ export function defaultConfig(): TVConfig {
 }
 
 // The static token to use: env var takes precedence over config.token.
-export function resolveStaticToken(config: TVConfig, envToken: string | undefined): string | undefined {
+export function resolveStaticToken(
+  config: TVConfig,
+  envToken: string | undefined,
+): string | undefined {
   return envToken?.trim() || config.token;
 }
 
@@ -181,9 +184,7 @@ export function clearTokens(config: TVConfig): TVConfig {
 // Coerce an untrusted value (config file / IPC payload) to a valid theme, defaulting to dark —
 // the app's historical appearance.
 export function normalizeTheme(value: unknown): ThemePreference {
-  return THEME_PREFERENCES.includes(value as ThemePreference)
-    ? (value as ThemePreference)
-    : "dark";
+  return THEME_PREFERENCES.includes(value as ThemePreference) ? (value as ThemePreference) : "dark";
 }
 
 // Canonicalize a MAC address to lowercase colon-separated form ("AA-BB-…" / "aabb…" → "aa:bb:…")
@@ -303,7 +304,9 @@ export function normalizeCommands(value: unknown): CommandConfig[] {
         : [];
     const deviceIds = [
       ...new Set(
-        rawIds.filter((v): v is string => typeof v === "string" && v.trim() !== "").map((v) => v.trim()),
+        rawIds
+          .filter((v): v is string => typeof v === "string" && v.trim() !== "")
+          .map((v) => v.trim()),
       ),
     ];
     if (deviceIds.length > 0) cmd.deviceIds = deviceIds;

@@ -12,7 +12,14 @@ type NumberInputProps = {
 
 // Numeric input with the app's text-input styling (Field.scss): decimals allowed, clamped into
 // [min, max] on blur. "" stays "" (unset) — clearing the field is meaningful, not an error.
-export function NumberInput({ value, onValueChange, min, max, className, ...rest }: NumberInputProps) {
+export function NumberInput({
+  value,
+  onValueChange,
+  min,
+  max,
+  className,
+  ...rest
+}: NumberInputProps) {
   const clamp = () => {
     if (value.trim() === "") return;
     const n = Number(value);

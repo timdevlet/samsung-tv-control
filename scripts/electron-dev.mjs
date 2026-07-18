@@ -6,9 +6,9 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "vite";
 // Under plain Node the electron package's default export is the path to the Electron binary.
 import electronBin from "electron";
+import { createServer } from "vite";
 import { buildMainPreloadAndIcons } from "./build-electron.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

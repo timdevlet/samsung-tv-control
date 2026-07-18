@@ -1,5 +1,4 @@
 import { useCallback, useState } from "react";
-import type { AppSettings } from "./types";
 import { AppHeader } from "./components/AppHeader";
 import { IconButton } from "./components/IconButton";
 import { TrashIcon } from "./components/icons";
@@ -12,6 +11,7 @@ import { SettingsView } from "./features/settings/SettingsView";
 import { useLogs } from "./hooks/useLogs";
 import { useOpenSettingsEvent } from "./hooks/useOpenSettingsEvent";
 import { useToasts } from "./hooks/useToasts";
+import type { AppSettings } from "./types";
 import "./App.scss";
 
 type View = "main" | "settings" | "logs";
@@ -105,7 +105,11 @@ export default function App() {
       {view === "logs" && (
         <>
           <LogView entries={logs.entries} autoScroll={autoScroll} />
-          <LogFooter autoScroll={autoScroll} onAutoScrollChange={setAutoScroll} count={logs.count} />
+          <LogFooter
+            autoScroll={autoScroll}
+            onAutoScrollChange={setAutoScroll}
+            count={logs.count}
+          />
         </>
       )}
 

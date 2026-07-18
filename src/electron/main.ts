@@ -7,20 +7,20 @@
 // Logs reach the window by subscribing to the logger's onLog() and forwarding each line over
 // IPC; a bounded backlog is kept so a freshly-opened window can render history.
 
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { startDaemon, type Daemon } from "../daemon-core.js";
-import type { ActionResult } from "../domain/daemon.js";
-import { createApp } from "../app.js";
-import { onLog, log, logError, type LogEntry } from "../log.js";
-import { getAuthStatus, login as runLogin, logout as runLogout, LOGIN_CANCELLED } from "./auth.js";
-import { getSettings, saveSettings, type AppSettings } from "./settings.js";
-import { isMockMode, installMockCloud } from "../dev/mock-cloud.js";
-import { updateConfig } from "../config.js";
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Tray } from "electron";
 import { discoverTVs, lookupMac } from "../api/discovery.js";
-import { pairWithTV, localDeviceId } from "../api/local-tv.js";
+import { localDeviceId, pairWithTV } from "../api/local-tv.js";
+import { createApp } from "../app.js";
+import { updateConfig } from "../config.js";
+import { type Daemon, startDaemon } from "../daemon-core.js";
+import { installMockCloud, isMockMode } from "../dev/mock-cloud.js";
 import { normalizeCommands } from "../domain/config.js";
+import type { ActionResult } from "../domain/daemon.js";
+import { type LogEntry, log, logError, onLog } from "../log.js";
+import { getAuthStatus, LOGIN_CANCELLED, login as runLogin, logout as runLogout } from "./auth.js";
+import { type AppSettings, getSettings, saveSettings } from "./settings.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -158,9 +158,7 @@ function buildTray(): void {
     // representation; otherwise Windows downscales the 32px and the thin glyph looks soft.
     trayImg.addRepresentation({
       scaleFactor: 1.5,
-      buffer: nativeImage
-        .createFromPath(path.join(__dirname, "tray-white@1.5x.png"))
-        .toPNG(),
+      buffer: nativeImage.createFromPath(path.join(__dirname, "tray-white@1.5x.png")).toPNG(),
     });
   }
   tray = new Tray(trayImg);
@@ -191,7 +189,13 @@ function refreshTrayMenu(): void {
       click: () => void daemon?.triggerOff(),
     },
     { type: "separator" },
-    { label: "Quit", click: () => { quitting = true; app.quit(); } },
+    {
+      label: "Quit",
+      click: () => {
+        quitting = true;
+        app.quit();
+      },
+    },
   ]);
   tray.setContextMenu(menu);
 }
@@ -244,7 +248,9 @@ async function start(): Promise<void> {
     };
     const deviceId = typeof p.deviceId === "string" ? p.deviceId.trim() : "";
     const keys = Array.isArray(p.keys)
-      ? p.keys.filter((k): k is string => typeof k === "string" && k.trim() !== "").map((k) => k.trim())
+      ? p.keys
+          .filter((k): k is string => typeof k === "string" && k.trim() !== "")
+          .map((k) => k.trim())
       : [];
     if (!deviceId) return { ok: false, error: "No TV selected." };
     return daemon.sendKeys(deviceId, keys);
@@ -295,12 +301,18 @@ async function start(): Promise<void> {
   ipcMain.handle("tv:discover", async () => {
     if (mockMode) {
       // No real network probe in mock mode — hand back a fake candidate the demo can "pair".
-      return { ok: true as const, candidates: [{ host: "10.0.0.42", name: "Mock Living Room TV", mac: "aa:bb:cc:dd:ee:ff" }] };
+      return {
+        ok: true as const,
+        candidates: [{ host: "10.0.0.42", name: "Mock Living Room TV", mac: "aa:bb:cc:dd:ee:ff" }],
+      };
     }
     try {
       const found = await discoverTVs();
       const candidates = await Promise.all(
-        found.map(async (tv) => ({ ...tv, mac: tv.mac || (await lookupMac(tv.host)) || undefined })),
+        found.map(async (tv) => ({
+          ...tv,
+          mac: tv.mac || (await lookupMac(tv.host)) || undefined,
+        })),
       );
       return { ok: true as const, candidates };
     } catch (err) {

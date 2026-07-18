@@ -1,16 +1,16 @@
+import { updateConfig } from "../config.js";
+import type { TVConfig } from "../domain/config.js";
 import {
-  isTokenFresh,
   applyTokens,
   DEFAULT_REDIRECT_URI,
+  isTokenFresh,
   type TokenResponse,
 } from "../domain/oauth.js";
-import type { TVConfig } from "../domain/config.js";
-import { updateConfig } from "../config.js";
-import { fetchErrorDetail } from "./smartthings.js";
 import { log } from "../log.js";
+import { fetchErrorDetail } from "./smartthings.js";
 
 // Pure helpers are re-exported from their new home for existing importers.
-export { authorizeUrl, hasOAuthClient, DEFAULT_REDIRECT_URI } from "../domain/oauth.js";
+export { authorizeUrl, DEFAULT_REDIRECT_URI, hasOAuthClient } from "../domain/oauth.js";
 
 // SmartThings OAuth 2.0 token endpoint.
 const TOKEN_URL = "https://auth-global.api.smartthings.com/oauth/token";
@@ -56,7 +56,9 @@ async function postToken(config: TVConfig, params: Record<string, string>): Prom
   }
 
   // Outcome only (grant type + HTTP status) — token responses must never be logged.
-  log(`SmartThings token ${params.grant_type} → ${res.status} ${res.ok ? "ok" : json.error ?? "error"}`);
+  log(
+    `SmartThings token ${params.grant_type} → ${res.status} ${res.ok ? "ok" : (json.error ?? "error")}`,
+  );
 
   if (!res.ok) {
     const detail = json.error_description || json.error || json.raw || text;
@@ -96,7 +98,9 @@ let refreshInFlight: Promise<TokenResponse> | null = null;
 // expiry and persisting the rotated refresh token back to the config file.
 export async function getAccessToken(config: TVConfig): Promise<string> {
   if (!config.refreshToken) {
-    throw new Error("Not authorized yet — run `npm run login` once to connect your SmartThings account.");
+    throw new Error(
+      "Not authorized yet — run `npm run login` once to connect your SmartThings account.",
+    );
   }
 
   if (isTokenFresh(config, Date.now())) return config.accessToken!;

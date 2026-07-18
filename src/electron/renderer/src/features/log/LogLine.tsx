@@ -1,6 +1,6 @@
 import { memo } from "react";
-import type { LogEntry } from "../../types";
 import { hasLeadingNewline, stripLeadingNewlines, tokenize } from "../../lib/highlight";
+import type { LogEntry } from "../../types";
 import "./LogLine.scss";
 
 // One log line, tokenized for highlighting. Memoized: entries are immutable and keyed by their

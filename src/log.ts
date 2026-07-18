@@ -36,8 +36,7 @@ const TIMESTAMP_RE = /^\[\d{1,2}:\d{2}:\d{2}(?:\s?[AP]M)?\]/i;
 // A variable token is one of: a quoted "string", a count like 1/3, a bare
 // number (incl. units like 2s/40min), or the → / ✅ markers. Each match becomes
 // either "var-string" (cyan) or "var-num" (yellow) when classified.
-const VAR_RE =
-  /("[^"]*"|`[^`]*`)|(\b\d+(?:\.\d+)?(?:\/\d+)?(?:\s?(?:ms|s|min|m))?\b)|([→✅])/g;
+const VAR_RE = /("[^"]*"|`[^`]*`)|(\b\d+(?:\.\d+)?(?:\/\d+)?(?:\s?(?:ms|s|min|m))?\b)|([→✅])/g;
 
 const useColor = process.stdout.isTTY === true && !process.env.NO_COLOR;
 

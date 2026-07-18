@@ -1,7 +1,7 @@
+import { MutedMessage } from "../../components/MutedMessage";
 import type { DeviceListState } from "../../hooks/useDeviceList";
 import type { DeviceConfigSettings, STDevice } from "../../types";
-import { MutedMessage } from "../../components/MutedMessage";
-import { deviceMultiSelectOptions, type DeviceOptionInput } from "./deviceOptions";
+import { type DeviceOptionInput, deviceMultiSelectOptions } from "./deviceOptions";
 import "./TvControlList.scss";
 
 // The single-select TV list that replaced the old segmented tab bar. Each row is one TV; clicking

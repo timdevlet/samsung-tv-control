@@ -32,7 +32,8 @@ export function sleepPc(): Promise<void> {
     child.on("error", (err) => reject(err));
     child.on("exit", (code) => {
       if (code === 0 || code == null) resolve();
-      else reject(new Error(`${cmd} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
+      else
+        reject(new Error(`${cmd} exited with code ${code}${stderr ? `: ${stderr.trim()}` : ""}`));
     });
   });
 }

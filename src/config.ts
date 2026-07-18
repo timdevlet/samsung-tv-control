@@ -1,7 +1,13 @@
-import { readFile, writeFile, unlink } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, type TVConfig } from "./domain/config.js";
+import { fileURLToPath } from "node:url";
+import {
+  clearTokens,
+  defaultConfig,
+  mergeConfig,
+  resolveStaticToken,
+  type TVConfig,
+} from "./domain/config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

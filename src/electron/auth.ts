@@ -5,10 +5,10 @@
 // token exchange, exactly as the CLI does, so both paths write the same smartthings-config.json.
 
 import { BrowserWindow } from "electron";
+import { authorizeUrl, DEFAULT_REDIRECT_URI, exchangeCode } from "../api/oauth.js";
 import { loadConfig, signOut } from "../config.js";
+import { isMockAuthorized, isMockMode, setMockAuthorized } from "../dev/mock-cloud.js";
 import { hasOAuthClient } from "../domain/oauth.js";
-import { authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "../api/oauth.js";
-import { isMockMode, isMockAuthorized, setMockAuthorized } from "../dev/mock-cloud.js";
 
 export interface AuthStatus {
   // An OAuth client (clientId + clientSecret) is configured. The client fields themselves now
@@ -45,7 +45,10 @@ export async function logout(): Promise<void> {
 
 // Pull the OAuth `code` (or an `error`) out of a redirect URL, but only once navigation has
 // actually reached the configured redirect target — so intermediate auth-server hops are ignored.
-function extractCode(navigated: string, redirectUri: string): { code?: string; error?: string } | null {
+function extractCode(
+  navigated: string,
+  redirectUri: string,
+): { code?: string; error?: string } | null {
   let url: URL;
   let redirect: URL;
   try {
@@ -119,7 +122,8 @@ function captureCode(
     // A "Cancel" button in the window's own menu/escape isn't available on a bare BrowserWindow,
     // so Escape closes the window — which onClosed turns into a clean cancellation.
     authWin.webContents.on("before-input-event", (_e, input) => {
-      if (input.type === "keyDown" && input.key === "Escape" && !authWin.isDestroyed()) authWin.close();
+      if (input.type === "keyDown" && input.key === "Escape" && !authWin.isDestroyed())
+        authWin.close();
     });
 
     const onNavigate = (url: string, event?: Electron.Event): void => {

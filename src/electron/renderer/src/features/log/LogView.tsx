@@ -1,6 +1,6 @@
-import type { LogEntry } from "../../types";
-import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { ScrollArea } from "../../components/ScrollArea";
+import { useAutoScroll } from "../../hooks/useAutoScroll";
+import type { LogEntry } from "../../types";
 import { LogLine } from "./LogLine";
 import "./LogView.scss";
 

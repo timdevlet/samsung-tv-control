@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { MAX_VISIBLE, type Toast, depthOf } from "../lib/toasts";
+import { depthOf, MAX_VISIBLE, type Toast } from "../lib/toasts";
 import "./ToastStack.scss";
 
 // Bottom-center stack of auto-dismissing notification cards. The newest card sits

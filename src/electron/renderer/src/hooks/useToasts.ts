@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type Toast, type ToastKind, beginLeave, pushToast, removeToast } from "../lib/toasts";
+import { beginLeave, pushToast, removeToast, type Toast, type ToastKind } from "../lib/toasts";
 
 const AUTO_DISMISS_MS = 3500;
 const LEAVE_MS = 250; // matches the .leaving transition in ToastStack.scss
@@ -40,7 +40,10 @@ export function useToasts(): {
         });
         return next;
       });
-      timers.current.set(id, setTimeout(() => dismiss(id), AUTO_DISMISS_MS));
+      timers.current.set(
+        id,
+        setTimeout(() => dismiss(id), AUTO_DISMISS_MS),
+      );
     },
     [dismiss],
   );

@@ -1,10 +1,11 @@
 // Vite config for the React renderer. Deliberately NOT named vite.config.ts: vitest auto-loads
 // a root vite.config.ts, and this config's `root`/plugins would break `npm test`. The build and
 // dev scripts pass this file explicitly via `configFile`.
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 

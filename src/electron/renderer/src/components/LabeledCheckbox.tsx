@@ -12,7 +12,11 @@ export function LabeledCheckbox({
 }) {
   return (
     <label>
-      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.currentTarget.checked)} />{" "}
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.currentTarget.checked)}
+      />{" "}
       {children}
     </label>
   );

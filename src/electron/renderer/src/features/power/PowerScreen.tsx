@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/Button";
 import { HdmiIcon, KeysIcon, MoonIcon, PowerIcon, PowerOffIcon } from "../../components/icons";
-import type { CommandSettings } from "../../types";
 import type { ToastKind } from "../../lib/toasts";
+import type { CommandSettings } from "../../types";
 import "./PowerScreen.scss";
 
 // A LAN-targeted command runs a key sequence instead of a cloud action (its single target is a

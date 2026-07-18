@@ -12,21 +12,26 @@
 
 import { globalShortcut } from "electron";
 import { createApp } from "./app.js";
+import { loadConfig } from "./config.js";
+import { isMockMode } from "./dev/mock-cloud.js";
 import {
-  hotkeyLabel,
-  isWithinBootWindow,
-  TriggerGate,
-  withRetry,
+  type CommandConfig,
+  commandIsKeySeq,
+  commandLabel,
+  normalizeCommands,
+} from "./domain/config.js";
+import {
   type ActionResult,
   type HotkeyTarget,
+  hotkeyLabel,
+  isWithinBootWindow,
   type Platform,
+  TriggerGate,
+  withRetry,
 } from "./domain/daemon.js";
-import { commandIsKeySeq, commandLabel, normalizeCommands, type CommandConfig } from "./domain/config.js";
-import { onWake } from "./os/wake-watch.js";
-import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
-import { isMockMode } from "./dev/mock-cloud.js";
-import { loadConfig } from "./config.js";
 import { log, logError, useTimestamps } from "./log.js";
+import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
+import { onWake } from "./os/wake-watch.js";
 
 const isMac = process.platform === "darwin";
 const PLATFORM: Platform = isMac ? "mac" : "other";
@@ -123,11 +128,17 @@ export async function startDaemon(): Promise<Daemon> {
         WAKE_RETRY_MS,
         sleep,
         (attempt, err) =>
-          log(`attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${WAKE_RETRY_MS / 1000}s...`),
+          log(
+            `attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${WAKE_RETRY_MS / 1000}s...`,
+          ),
       );
-      return acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
+      return acted
+        ? { ok: true }
+        : { ok: false, error: "No TVs selected — choose one in Settings." };
     } catch (e) {
-      logError(`failed after ${WAKE_ATTEMPTS} attempts: ${e instanceof Error ? e.message : String(e)}`);
+      logError(
+        `failed after ${WAKE_ATTEMPTS} attempts: ${e instanceof Error ? e.message : String(e)}`,
+      );
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     } finally {
       gate.release(Date.now());
@@ -137,19 +148,29 @@ export async function startDaemon(): Promise<Daemon> {
   // Turn the TV off; when `sleepAfter`, immediately put this PC to sleep as well. Shared by both
   // off actions — triggerOffAndSleep and triggerOff — and by the off commands. Like triggerOn,
   // an optional target scopes a per-TV command to its own TV.
-  async function runOff(sleepAfter: boolean, label: string, target?: HotkeyTarget): Promise<ActionResult> {
+  async function runOff(
+    sleepAfter: boolean,
+    label: string,
+    target?: HotkeyTarget,
+  ): Promise<ActionResult> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
       return { ok: false, error: "A command is already running.", busy: true };
     }
     const ids = await resolveTargetIds(target);
-    log(`\n${label} → turning TV off${sleepAfter ? ", then sleeping this PC" : " (this PC stays on)"}...${scopeTag(ids)}`);
+    log(
+      `\n${label} → turning TV off${sleepAfter ? ", then sleeping this PC" : " (this PC stays on)"}...${scopeTag(ids)}`,
+    );
     let result: ActionResult;
     try {
       const acted = await app.off(ids);
-      result = acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
+      result = acted
+        ? { ok: true }
+        : { ok: false, error: "No TVs selected — choose one in Settings." };
     } catch (e) {
-      logError(`TV off failed: ${e instanceof Error ? e.message : String(e)}${sleepAfter ? " — sleeping this PC anyway." : ""}`);
+      logError(
+        `TV off failed: ${e instanceof Error ? e.message : String(e)}${sleepAfter ? " — sleeping this PC anyway." : ""}`,
+      );
       result = { ok: false, error: e instanceof Error ? e.message : String(e) };
     } finally {
       // Release before suspending: sleepPc()'s child process may not exit (and so not resolve)
@@ -191,7 +212,9 @@ export async function startDaemon(): Promise<Daemon> {
     log(`\n${label} → running...`);
     try {
       const acted = await op();
-      return acted ? { ok: true } : { ok: false, error: "No TVs selected — choose one in Settings." };
+      return acted
+        ? { ok: true }
+        : { ok: false, error: "No TVs selected — choose one in Settings." };
     } catch (e) {
       logError(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
@@ -210,7 +233,10 @@ export async function startDaemon(): Promise<Daemon> {
     // KEY_* and gate-guards the send.
     if (commandIsKeySeq(cmd)) {
       const deviceId = cmd.deviceIds![0];
-      const tokens = (cmd.keySeq ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+      const tokens = (cmd.keySeq ?? "")
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
       return triggerSendKeys(deviceId, tokens);
     }
     // undefined = the Settings selection; a targeted command carries its explicit ids.
@@ -275,10 +301,14 @@ export async function startDaemon(): Promise<Daemon> {
     const arm = (accel: string, label: string, handler: () => void): void => {
       try {
         if (!globalShortcut.register(accel, handler)) {
-          logError(`Could not register ${label} hotkey "${hotkeyLabel(accel, PLATFORM)}" — it may be reserved or already in use.`);
+          logError(
+            `Could not register ${label} hotkey "${hotkeyLabel(accel, PLATFORM)}" — it may be reserved or already in use.`,
+          );
         }
       } catch (e) {
-        logError(`Could not register ${label} hotkey "${hotkeyLabel(accel, PLATFORM)}": ${e instanceof Error ? e.message : String(e)}`);
+        logError(
+          `Could not register ${label} hotkey "${hotkeyLabel(accel, PLATFORM)}": ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     };
     // Each accelerator registers with the OS exactly once. When two commands share a combo the

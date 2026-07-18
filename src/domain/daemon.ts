@@ -20,7 +20,10 @@ export function hotkeyLabel(accelerator: string | undefined, platform: Platform)
   const isMac = platform === "mac";
   const mods: string[] = [];
   let key = "";
-  for (const raw of accel.split("+").map((p) => p.trim()).filter(Boolean)) {
+  for (const raw of accel
+    .split("+")
+    .map((p) => p.trim())
+    .filter(Boolean)) {
     switch (raw.toLowerCase()) {
       case "command":
       case "cmd":

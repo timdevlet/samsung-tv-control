@@ -1,5 +1,5 @@
-import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import type { EventListeners, PartialOptions } from "overlayscrollbars";
+import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import type { ComponentPropsWithoutRef } from "react";
 import "./ScrollArea.scss";
 

@@ -4,11 +4,11 @@
 // an in-process TVTransport over the same FakeTVState the fake cloud uses, so both the cloud and
 // local Settings UIs (and tests) drive one identical fake TV with identical log lines.
 
-import { parseStatus, mainCapabilities } from "../domain/tv.js";
-import type { STDevice, TVStatus } from "../domain/tv.js";
-import type { TVTransport } from "../api/transport.js";
 import { keyDelayMs } from "../api/local-tv.js";
+import type { TVTransport } from "../api/transport.js";
 import type { TVConfig } from "../config.js";
+import type { STDevice, TVStatus } from "../domain/tv.js";
+import { mainCapabilities, parseStatus } from "../domain/tv.js";
 import { log } from "../log.js";
 import { FakeTVState, isMockAuthorized } from "./mock-cloud.js";
 
@@ -65,27 +65,31 @@ export class FakeTransport implements TVTransport {
         await sleep(delayMs);
       }
     }
-    log(`  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`);
+    log(
+      `  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`,
+    );
   }
 
   async listDevices(): Promise<STDevice[]> {
     await this.delay();
-    return this.tvState.devices
-      .map((d) => {
-        // A fake device id starting with "local:" is a LAN-paired TV; anything else is a cloud
-        // (SmartThings) device — so the mock exercises the same source badging as production.
-        const source = d.deviceId.startsWith("local:") ? ("local" as const) : ("cloud" as const);
-        return {
-          deviceId: d.deviceId,
-          label: d.label || d.name || d.deviceId,
-          name: d.name ?? "",
-          capabilities: mainCapabilities(d),
-          source,
-        };
-      })
-      // Mirror RoutingTransport: cloud TVs require a signed-in account, so they drop out on Sign
-      // out; local (LAN) TVs are config-driven and always listed.
-      .filter((d) => d.source === "local" || isMockAuthorized());
+    return (
+      this.tvState.devices
+        .map((d) => {
+          // A fake device id starting with "local:" is a LAN-paired TV; anything else is a cloud
+          // (SmartThings) device — so the mock exercises the same source badging as production.
+          const source = d.deviceId.startsWith("local:") ? ("local" as const) : ("cloud" as const);
+          return {
+            deviceId: d.deviceId,
+            label: d.label || d.name || d.deviceId,
+            name: d.name ?? "",
+            capabilities: mainCapabilities(d),
+            source,
+          };
+        })
+        // Mirror RoutingTransport: cloud TVs require a signed-in account, so they drop out on Sign
+        // out; local (LAN) TVs are config-driven and always listed.
+        .filter((d) => d.source === "local" || isMockAuthorized())
+    );
   }
 }
 

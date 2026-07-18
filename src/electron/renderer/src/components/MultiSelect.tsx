@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { selectionState, triggerLabel } from "../lib/multiselect";
 import { ChevronDownIcon } from "./icons";
 import { MultiSelectList, type MultiSelectOption } from "./MultiSelectList";
-import { selectionState, triggerLabel } from "../lib/multiselect";
 import "./MultiSelect.scss";
 
 export type { MultiSelectOption };
@@ -77,7 +77,12 @@ export function MultiSelect({
         <ChevronDownIcon size={16} className={open ? "chev open" : "chev"} />
       </button>
       {open && total > 0 && (
-        <div className="multiselect-panel" role="listbox" aria-label={ariaLabel} aria-multiselectable>
+        <div
+          className="multiselect-panel"
+          role="listbox"
+          aria-label={ariaLabel}
+          aria-multiselectable
+        >
           <MultiSelectList options={options} selected={selected} onChange={onChange} />
         </div>
       )}

@@ -1,10 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  AppSettings,
-  CommandSettings,
-  DeviceConfigSettings,
-  ThemePreference,
-} from "../types";
+import type { AppSettings, CommandSettings, DeviceConfigSettings, ThemePreference } from "../types";
 
 export interface SettingsDraft {
   clientId: string;
@@ -73,7 +68,11 @@ export function useSettingsForm(
   const selectOnlyDevice = (deviceId: string) =>
     setDraft((d) => ({ ...d, selectedDeviceIds: new Set([deviceId]) }));
 
-  const setDeviceConfig = <K extends keyof DeviceConfigSettings>(deviceId: string, key: K, value: DeviceConfigSettings[K]) =>
+  const setDeviceConfig = <K extends keyof DeviceConfigSettings>(
+    deviceId: string,
+    key: K,
+    value: DeviceConfigSettings[K],
+  ) =>
     setDraft((d) => ({
       ...d,
       deviceConfigs: {

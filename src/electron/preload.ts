@@ -2,13 +2,13 @@
 // Exposes a tiny, explicit `window.tvAPI` (contextIsolation is on, nodeIntegration off) — the
 // log window can read history, subscribe to new lines, and run user commands, nothing more.
 
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
+import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
+import type { CommandConfig } from "../domain/config.js";
+import type { ActionResult } from "../domain/daemon.js";
+import type { STDevice } from "../domain/tv.js";
 import type { LogEntry } from "../log.js";
 import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
-import type { STDevice } from "../domain/tv.js";
-import type { ActionResult } from "../domain/daemon.js";
-import type { CommandConfig } from "../domain/config.js";
 
 type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
 type DeviceListResult =

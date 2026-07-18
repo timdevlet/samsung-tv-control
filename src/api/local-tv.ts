@@ -23,14 +23,14 @@ import { createSocket } from "node:dgram";
 import WebSocket from "ws";
 import {
   canonicalizeMac,
-  NO_TOKEN_PAIRED,
-  wsTokenForConnect,
   type DeviceConfig,
+  NO_TOKEN_PAIRED,
   type TVConfig,
+  wsTokenForConnect,
 } from "../domain/config.js";
 import { LOCAL_INPUT_CAPABILITY, type STDevice, type TVStatus } from "../domain/tv.js";
-import type { TVTransport } from "./transport.js";
 import { log } from "../log.js";
+import type { TVTransport } from "./transport.js";
 
 // A stable synthetic deviceId for a LAN TV (there is no cloud UUID). Keyed by MAC so it survives
 // a DHCP address change; falls back to host when no MAC is set yet.
@@ -45,7 +45,10 @@ export function localDeviceId(cfg: Pick<DeviceConfig, "mac" | "host">): string {
 export interface MinimalWebSocket {
   send(data: string): void;
   close(): void;
-  addEventListener(type: "open" | "message" | "error" | "close", listener: (ev: unknown) => void): void;
+  addEventListener(
+    type: "open" | "message" | "error" | "close",
+    listener: (ev: unknown) => void,
+  ): void;
 }
 export type WebSocketFactory = (url: string) => MinimalWebSocket;
 
@@ -150,7 +153,9 @@ export function connectRemote(
       if (settled) return;
       settled = true;
       ws.close();
-      reject(new Error("Timed out waiting for the TV — accept the on-screen “Allow” prompt and retry."));
+      reject(
+        new Error("Timed out waiting for the TV — accept the on-screen “Allow” prompt and retry."),
+      );
     }, timeoutMs);
 
     const finish = (fn: () => void) => {
@@ -198,7 +203,11 @@ export function connectRemote(
         // waiting the full client timeout). Fail fast with the actionable message.
         finish(() => {
           ws.close();
-          reject(new Error("The TV's “Allow” prompt wasn't accepted in time — turn the TV on, click Pair, and accept it on screen."));
+          reject(
+            new Error(
+              "The TV's “Allow” prompt wasn't accepted in time — turn the TV on, click Pair, and accept it on screen.",
+            ),
+          );
         });
       }
     });
@@ -327,7 +336,8 @@ export class LocalTV implements TVTransport {
 
   private deviceConfig(deviceId: string): DeviceConfig {
     const cfg = this.config.deviceConfigs?.[deviceId];
-    if (!cfg?.host) throw new Error(`TV ${deviceId} has no LAN address configured — set its host in Settings.`);
+    if (!cfg?.host)
+      throw new Error(`TV ${deviceId} has no LAN address configured — set its host in Settings.`);
     return cfg;
   }
 
@@ -341,7 +351,8 @@ export class LocalTV implements TVTransport {
 
   async powerOn(deviceId: string): Promise<void> {
     const cfg = this.deviceConfig(deviceId);
-    if (!cfg.mac) throw new Error(`TV ${deviceId} has no MAC address — Wake-on-LAN can't power it on.`);
+    if (!cfg.mac)
+      throw new Error(`TV ${deviceId} has no MAC address — Wake-on-LAN can't power it on.`);
     log(`Sending Wake-on-LAN to ${cfg.mac}...`);
     await sendWakeOnLan(cfg.mac);
   }
@@ -355,7 +366,10 @@ export class LocalTV implements TVTransport {
     // Prefer a recorded key sequence when the user configured one (there's no authoritative
     // "set HDMI2" over the remote protocol); otherwise send a single source key.
     const keys = cfg.inputKeySeq
-      ? cfg.inputKeySeq.split(",").map((k) => k.trim()).filter(Boolean)
+      ? cfg.inputKeySeq
+          .split(",")
+          .map((k) => k.trim())
+          .filter(Boolean)
       : [defaultInputKey(source)];
     await this.sendKeys(deviceId, keys);
   }
@@ -383,7 +397,9 @@ export class LocalTV implements TVTransport {
         await this.sleepFn(delayMs);
       }
     }
-    log(`  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`);
+    log(
+      `  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`,
+    );
   }
 
   // A LAN "device list" is config-driven — there's no account to enumerate. Each deviceConfigs
