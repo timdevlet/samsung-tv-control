@@ -54,6 +54,7 @@ vi.mock("ws", () => {
 });
 
 import { createApp } from "../src/app.js";
+import { closeAllRemoteConnections } from "../src/api/local-tv.js";
 
 // The remote keys a fake WS received, in order.
 const sentKeys = (ws: { sent: string[] }): string[] =>
@@ -64,6 +65,9 @@ beforeEach(() => {
   delete process.env.SMARTTHINGS_TOKEN;
   delete process.env.SMARTTHINGS_MOCK;
   wsFakes.instances.length = 0;
+  // Remote connections are pooled process-wide and kept open for reuse — drop any a prior case left
+  // behind so each test opens (and counts) its own fresh WebSocket.
+  closeAllRemoteConnections();
 });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -153,7 +157,8 @@ describe("routing transport", () => {
     expect(wsFakes.instances).toHaveLength(1);
     // pcInput "HDMI2" maps to the direct key (jumps straight there) rather than a cycling KEY_HDMI.
     expect(sentKeys(wsFakes.instances[0])).toEqual(["KEY_HDMI2"]);
-    expect(wsFakes.instances[0].closed).toBe(true);
+    // The connection is pooled for reuse now, not closed after the send.
+    expect(wsFakes.instances[0].closed).toBe(false);
   });
 
   it("sendKeys routes a normalized sequence to a local:<id> TV over the LAN, never the cloud", async () => {
@@ -168,7 +173,8 @@ describe("routing transport", () => {
     await expect(createApp().sendKeys("local:tv", ["HDMI", "UP", "LEFT"])).resolves.toBe(true);
     expect(wsFakes.instances).toHaveLength(1);
     expect(sentKeys(wsFakes.instances[0])).toEqual(["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
-    expect(wsFakes.instances[0].closed).toBe(true);
+    // Pooled for reuse — not closed after the send.
+    expect(wsFakes.instances[0].closed).toBe(false);
     const calledCloud = fetchSpy.mock.calls.some(([url]) =>
       String(url).startsWith("https://api.smartthings.com"),
     );

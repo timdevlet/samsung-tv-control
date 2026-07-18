@@ -114,6 +114,12 @@ export function keyFrame(key: string): string {
 interface ConnectResult {
   send(key: string): Promise<void>;
   close(): void;
+  // Whether the socket is still connected. A pooled connection is reused only while this holds; a
+  // TV that slept/dropped flips it false (via the post-handshake close/error listeners) so the next
+  // send reconnects instead of writing to a dead socket.
+  isOpen(): boolean;
+  // Register a callback fired once when the socket closes — the pool uses it to evict the entry.
+  onClose(cb: () => void): void;
   // The token the TV returns on the ms.channel.connect handshake (present on first pair).
   token?: string;
 }
@@ -130,6 +136,16 @@ export function connectRemote(
   return new Promise((resolve, reject) => {
     const ws = wsFactory(remoteUrl(host, token));
     let settled = false;
+    // Liveness for connection reuse. `open` turns true once the TV accepts the handshake and false
+    // when the socket later closes/errors; `closeCbs` fire once on that transition so the pool can
+    // drop this entry. (Before the handshake, a close/error still rejects the connect Promise below.)
+    let open = false;
+    const closeCbs: Array<() => void> = [];
+    const markClosed = () => {
+      if (!open) return;
+      open = false;
+      for (const cb of closeCbs) cb();
+    };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -154,18 +170,24 @@ export function connectRemote(
       }
       if (msg.event === "ms.channel.connect") {
         const newToken = msg.data?.token;
-        finish(() =>
+        finish(() => {
+          open = true;
           resolve({
             token: newToken,
-            send: (key: string) =>
-              new Promise<void>((res) => {
-                ws.send(keyFrame(key));
-                // The remote channel doesn't ack key clicks; give the TV a beat to act.
-                setTimeout(res, 200);
-              }),
+            // Fire-and-forget: write the frame and resolve immediately. The remote channel doesn't
+            // ack key clicks, so there's no reply to wait for — pacing (if any) is the caller's
+            // per-sequence keyDelay, not a fixed per-key stall. Keeps a held-down button snappy.
+            send: (key: string) => {
+              ws.send(keyFrame(key));
+              return Promise.resolve();
+            },
             close: () => ws.close(),
-          }),
-        );
+            isOpen: () => open,
+            onClose: (cb: () => void) => {
+              closeCbs.push(cb);
+            },
+          });
+        });
       } else if (msg.event === "ms.channel.unauthorized") {
         finish(() => {
           ws.close();
@@ -180,8 +202,17 @@ export function connectRemote(
         });
       }
     });
-    ws.addEventListener("error", () => finish(() => reject(new Error(`Couldn't reach the TV at ${host}.`))));
-    ws.addEventListener("close", () => finish(() => reject(new Error(`Connection to ${host} closed before it was ready.`))));
+    // markClosed() first: once the connection is live (post-handshake) these fire the pool's
+    // eviction callbacks; finish() is a no-op then (already settled). Before the handshake they
+    // only reject the pending connect Promise.
+    ws.addEventListener("error", () => {
+      markClosed();
+      finish(() => reject(new Error(`Couldn't reach the TV at ${host}.`)));
+    });
+    ws.addEventListener("close", () => {
+      markClosed();
+      finish(() => reject(new Error(`Connection to ${host} closed before it was ready.`)));
+    });
   });
 }
 
@@ -198,6 +229,70 @@ export async function pairWithTV(
   const conn = await connectRemote(host, undefined, wsFactory, timeoutMs);
   conn.close();
   return conn.token || NO_TOKEN_PAIRED;
+}
+
+// A pool of live remote connections, reused across key sends so a button press is just a socket
+// write (no per-press TLS + ms.channel.connect handshake). Keyed by host+token: a re-pair (new
+// token) or a different TV opens its own entry. Entries evict themselves when the socket closes.
+//
+// This lives at module scope because the transport is rebuilt per command invocation (see the
+// composition-root note in src/app.ts) — an instance-held socket wouldn't survive between presses,
+// but the module (and this pool) stays loaded for the daemon's lifetime. LocalTV takes the pool as
+// a constructor dependency (defaulting to the shared one) so tests can pass an isolated pool.
+export interface RemoteConnectionPool {
+  // Return a live connection for (host, token), opening one if none is pooled or the pooled one
+  // has closed. Concurrent callers for the same key share the single in-flight connect.
+  get(host: string, token: string | undefined, wsFactory: WebSocketFactory): Promise<ConnectResult>;
+  // Close and drop every pooled connection (teardown; also used to isolate tests).
+  closeAll(): void;
+}
+
+export function createRemoteConnectionPool(): RemoteConnectionPool {
+  const conns = new Map<string, Promise<ConnectResult>>();
+  const keyOf = (host: string, token: string | undefined) => `${host}|${token ?? ""}`;
+  return {
+    async get(host, token, wsFactory) {
+      const key = keyOf(host, token);
+      const existing = conns.get(key);
+      if (existing) {
+        try {
+          const conn = await existing;
+          if (conn.isOpen()) return conn;
+        } catch {
+          // A prior connect that ended up rejecting — fall through and open a fresh one.
+        }
+        conns.delete(key);
+      }
+      const pending = connectRemote(host, token, wsFactory).then((conn) => {
+        // Self-evict on close so a slept/dropped TV isn't handed back as live. Guard identity in
+        // case the entry was already replaced.
+        conn.onClose(() => {
+          if (conns.get(key) === pending) conns.delete(key);
+        });
+        return conn;
+      });
+      pending.catch(() => {
+        if (conns.get(key) === pending) conns.delete(key);
+      });
+      conns.set(key, pending);
+      return pending;
+    },
+    closeAll() {
+      for (const pending of conns.values()) {
+        void pending.then((conn) => conn.close()).catch(() => {});
+      }
+      conns.clear();
+    },
+  };
+}
+
+// The process-wide pool shared by every per-invocation LocalTV (the default constructor arg).
+const sharedRemotePool = createRemoteConnectionPool();
+
+// Close and forget every pooled remote connection. Handy for teardown and to isolate tests that
+// would otherwise share a live socket for the same host+token.
+export function closeAllRemoteConnections(): void {
+  sharedRemotePool.closeAll();
 }
 
 // The real WebSocket, via the `ws` package. The Samsung TV serves the remote channel over TLS
@@ -225,6 +320,9 @@ export class LocalTV implements TVTransport {
     private readonly wsFactory: WebSocketFactory = defaultWsFactory,
     // Injectable so tests can record/skip the inter-key waits.
     private readonly sleepFn: (ms: number) => Promise<void> = sleep,
+    // Shared process-wide by default so a live socket survives between key presses; tests pass an
+    // isolated pool for clean per-test state.
+    private readonly pool: RemoteConnectionPool = sharedRemotePool,
   ) {}
 
   private deviceConfig(deviceId: string): DeviceConfig {
@@ -262,29 +360,30 @@ export class LocalTV implements TVTransport {
     await this.sendKeys(deviceId, keys);
   }
 
-  // Open one WS, send the keys in order (one at a time, ~200ms apart — see connectRemote's send —
-  // plus the TV's optional keyDelay between keys), close it. Public so a "run this key sequence"
-  // action can reach it directly (via app.sendKeys), not only the input-switch path. Each keypress
-  // is logged as it goes out so the sequence is observable step-by-step in the log.
+  // Send the keys in order over a pooled, kept-alive WS — no per-key stall, so a single press fires
+  // as fast as the frame can go out and a held button repeats instantly. The connection is NOT
+  // closed afterwards: it's left in the pool for the next press. The only pause is the TV's optional
+  // keyDelay *between* the keys of a multi-key sequence. Public so a "run this key sequence" action
+  // can reach it directly (via app.sendKeys), not only the input-switch path. Each keypress is
+  // logged as it goes out so the sequence is observable step-by-step in the log.
   async sendKeys(deviceId: string, keys: string[]): Promise<void> {
     const cfg = this.deviceConfig(deviceId);
     const delayMs = keyDelayMs(cfg);
     // A NO_TOKEN_PAIRED sentinel means "paired, connect without a token" — resolve it to undefined
     // so remoteUrl builds a token-less URL.
-    const conn = await connectRemote(cfg.host!, wsTokenForConnect(cfg.wsToken), this.wsFactory);
-    try {
-      for (let i = 0; i < keys.length; i++) {
-        log(`  → key ${i + 1}/${keys.length}: ${keys[i]}`);
-        await conn.send(keys[i]);
-        if (delayMs > 0 && i < keys.length - 1) {
-          log(`  … waiting ${delayMs / 1000}s`);
-          await this.sleepFn(delayMs);
-        }
+    const token = wsTokenForConnect(cfg.wsToken);
+    let conn = await this.pool.get(cfg.host!, token, this.wsFactory);
+    for (let i = 0; i < keys.length; i++) {
+      // Reconnect transparently if the socket dropped between presses (TV slept, keyDelay elapsed).
+      if (!conn.isOpen()) conn = await this.pool.get(cfg.host!, token, this.wsFactory);
+      log(`  → key ${i + 1}/${keys.length}: ${keys[i]}`);
+      await conn.send(keys[i]);
+      if (delayMs > 0 && i < keys.length - 1) {
+        log(`  … waiting ${delayMs / 1000}s`);
+        await this.sleepFn(delayMs);
       }
-      log(`  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`);
-    } finally {
-      conn.close();
     }
+    log(`  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`);
   }
 
   // A LAN "device list" is config-driven — there's no account to enumerate. Each deviceConfigs

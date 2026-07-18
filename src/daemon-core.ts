@@ -232,18 +232,29 @@ export async function startDaemon(): Promise<Daemon> {
     }
   }
 
-  // Send an explicit remote-key sequence to one TV (Settings → "Run key sequence"). Guards to LAN
-  // devices — a `local:<mac>` id (see the id convention in src/app.ts); a cloud id has no raw-key
-  // channel, so reject it here before app.sendKeys would hit the cloud transport's throw. Reuses
-  // the same busy gate as the other one-shot actions.
-  function triggerSendKeys(deviceId: string, keys: string[]): Promise<ActionResult> {
+  // Send an explicit remote-key sequence to one TV (Settings → "Run key sequence", or a pinned
+  // key-sequence command). Guards to LAN devices — a `local:<mac>` id (see the id convention in
+  // src/app.ts); a cloud id has no raw-key channel, so reject it here before app.sendKeys would hit
+  // the cloud transport's throw. Deliberately does NOT take the busy gate: raw key sends go over a
+  // pooled, kept-alive socket and must fire as fast as the user presses — gating them would drop
+  // rapid presses as "already running". (The gate still protects the power/switch actions, where a
+  // held combo could otherwise spawn concurrent wake handlers.)
+  async function triggerSendKeys(deviceId: string, keys: string[]): Promise<ActionResult> {
     if (!deviceId.startsWith("local:")) {
-      return Promise.resolve({ ok: false, error: "Only LAN TVs can run a raw key sequence." });
+      return { ok: false, error: "Only LAN TVs can run a raw key sequence." };
     }
     if (keys.length === 0) {
-      return Promise.resolve({ ok: false, error: "Enter a key sequence first." });
+      return { ok: false, error: "Enter a key sequence first." };
     }
-    return runSimple(`Send keys [${keys.join(", ")}]`, () => app.sendKeys(deviceId, keys));
+    const label = `Send keys [${keys.join(", ")}]`;
+    log(`\n${label} → running...`);
+    try {
+      await app.sendKeys(deviceId, keys);
+      return { ok: true };
+    } catch (e) {
+      logError(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   // Re-read the command list. Hotkey values are taken as-is (the capture UI only ever produces

@@ -10,6 +10,7 @@ import {
   parseKeySequence,
   keyDelayMs,
   LocalTV,
+  closeAllRemoteConnections,
   type MinimalWebSocket,
 } from "../src/api/local-tv.js";
 import { canonicalizeMac, NO_TOKEN_PAIRED } from "../src/domain/config.js";
@@ -39,7 +40,11 @@ class FakeWS implements MinimalWebSocket {
   }
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  // Connections are pooled process-wide (keyed by host+token); drop them so each case starts fresh.
+  closeAllRemoteConnections();
+});
 
 describe("canonicalizeMac", () => {
   it("normalizes separators and case to colon-lowercase", () => {
@@ -208,7 +213,8 @@ describe("LocalTV", () => {
     };
     await new LocalTV(config, factory).powerOff("local:tv");
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_POWER"]);
-    expect(ws.closed).toBe(true);
+    // The socket is pooled for reuse now, not closed after the send.
+    expect(ws.closed).toBe(false);
   });
 
   it("connects without a token when the stored wsToken is the NO_TOKEN_PAIRED sentinel", async () => {
@@ -279,7 +285,7 @@ describe("LocalTV", () => {
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI3"]);
   });
 
-  it("sendKeys sends an explicit key list in order over one authorized WS, then closes", async () => {
+  it("sendKeys sends an explicit key list in order over one authorized WS, kept open for reuse", async () => {
     const ws = new FakeWS();
     const factory = (url: string) => {
       expect(url).toContain("token=stored-token");
@@ -288,7 +294,45 @@ describe("LocalTV", () => {
     };
     await new LocalTV(config, factory).sendKeys("local:tv", ["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
-    expect(ws.closed).toBe(true);
+    // Not closed — the connection is pooled so the next press skips the handshake.
+    expect(ws.closed).toBe(false);
+  });
+
+  it("sendKeys reuses one pooled connection across presses (no reconnect per key)", async () => {
+    const ws = new FakeWS();
+    let opens = 0;
+    const factory = () => {
+      opens++;
+      queueMicrotask(() => ws.accept());
+      return ws;
+    };
+    const tv = new LocalTV(config, factory);
+    await tv.sendKeys("local:tv", ["KEY_VOLUP"]);
+    await tv.sendKeys("local:tv", ["KEY_VOLUP"]);
+    await tv.sendKeys("local:tv", ["KEY_VOLUP"]);
+    // One handshake total; every subsequent press is just a frame on the same socket.
+    expect(opens).toBe(1);
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_VOLUP", "KEY_VOLUP", "KEY_VOLUP"]);
+  });
+
+  it("sendKeys reconnects when the pooled socket has dropped", async () => {
+    const first = new FakeWS();
+    const second = new FakeWS();
+    const sockets = [first, second];
+    let opens = 0;
+    const factory = () => {
+      const ws = sockets[opens++];
+      queueMicrotask(() => ws.accept());
+      return ws;
+    };
+    const tv = new LocalTV(config, factory);
+    await tv.sendKeys("local:tv", ["KEY_UP"]);
+    // The TV slept — the socket closes and the pool evicts it.
+    first.emit("close");
+    await tv.sendKeys("local:tv", ["KEY_DOWN"]);
+    expect(opens).toBe(2);
+    expect(first.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_UP"]);
+    expect(second.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_DOWN"]);
   });
 
   it("sendKeys waits the TV's keyDelay between keys, but not after the last", async () => {

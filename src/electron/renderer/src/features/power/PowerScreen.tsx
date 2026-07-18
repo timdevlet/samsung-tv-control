@@ -131,22 +131,33 @@ export function PowerScreen({
   onToast: (kind: ToastKind, text: string) => void;
   onOpenSettings: () => void;
 }) {
-  // Id of the command currently running (its button shows a pending state); null = none.
-  const [runningCmd, setRunningCmd] = useState<string | null>(null);
+  // Ids of the commands currently running (each shows a pending state). A set, not a single id, so
+  // presses don't block each other — you can fire the next before the last returns.
+  const [running, setRunning] = useState<ReadonlySet<string>>(new Set());
   const config = useMainScreen();
 
-  // Run a pinned command as configured (its own action/HDMI/TVs). Disabled while any button is
-  // busy, mirroring the Settings list's single-run gate (the daemon would reject a concurrent run
-  // anyway).
+  // Run a pinned command as configured (its own action/HDMI/TVs). Never gated — a press always
+  // dispatches immediately so key sends keep up with a rapidly tapped (or held) button. Key-sequence
+  // commands skip the pending indicator and the success toast entirely (both would just be noise at
+  // one-per-press); power/switch actions keep the pending state + confirmation toast. A `busy`
+  // result (the daemon's gate rejecting an overlapping power/switch run) is a silent no-op.
   const runCommand = async (cmd: CommandSettings) => {
-    if (runningCmd) return;
-    setRunningCmd(cmd.id);
+    const keySeq = commandIsKeySeq(cmd);
+    if (!keySeq) setRunning((prev) => new Set(prev).add(cmd.id));
     try {
       const result = await window.tvAPI.runCommand(cmd);
-      if (result.ok) onToast("success", `${commandLabel(cmd)} — done`);
-      else onToast("error", result.error || "Command failed");
+      if (result.ok) {
+        if (!keySeq) onToast("success", `${commandLabel(cmd)} — done`);
+      } else if (!result.busy) {
+        onToast("error", result.error || "Command failed");
+      }
     } finally {
-      setRunningCmd(null);
+      if (!keySeq)
+        setRunning((prev) => {
+          const next = new Set(prev);
+          next.delete(cmd.id);
+          return next;
+        });
     }
   };
 
@@ -161,9 +172,8 @@ export function PowerScreen({
                 <button
                   type="button"
                   className={`power-button ${commandHoverClass(cmd)}${
-                    runningCmd === cmd.id ? " pending" : ""
+                    running.has(cmd.id) ? " pending" : ""
                   }`}
-                  disabled={runningCmd !== null}
                   onClick={() => void runCommand(cmd)}
                   aria-label={`${commandLabel(cmd)} — ${commandTvName(cmd, config.tvNames)}`}
                 >
@@ -185,7 +195,7 @@ export function PowerScreen({
         ))}
       {/* Always rendered so the layout never jumps (the ErrorText pattern). */}
       <p className="power-result" aria-live="polite">
-        {runningCmd !== null && <span className="working">Working…</span>}
+        {running.size > 0 && <span className="working">Working…</span>}
       </p>
     </div>
   );
