@@ -3,9 +3,11 @@ import type { CommandAction, CommandSettings } from "../../types";
 import { Button } from "../../components/Button";
 import { HotkeyField } from "../../components/HotkeyField";
 import { IconButton } from "../../components/IconButton";
+import { GroupSelect } from "../../components/GroupSelect";
 import { SelectMenu, type SelectMenuOption } from "../../components/SelectMenu";
 import { TextInput } from "../../components/TextInput";
 import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
+import { REMOTE_KEY_GROUPS, appendKeyToken } from "../../lib/remoteKeys";
 import type { ToastKind } from "../../lib/toasts";
 import "./CommandList.scss";
 
@@ -21,10 +23,6 @@ const HDMI_INPUTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const;
 
 const HDMI_OPTIONS = HDMI_INPUTS.map((v, i) => ({ value: v, label: `HDMI ${i + 1}` }));
 
-// The "All TVs" target sentinel — a command with no TV picked runs against every enabled TV. Can't
-// collide with a real device id (SmartThings UUIDs / "local:<mac>").
-const ALL_TVS = "__all__";
-
 // Mirrors commandUsesHdmi in src/domain/config.ts — duplicated so the sandboxed renderer keeps
 // importing only types from the node-side modules.
 const usesHdmi = (action: CommandAction) => action === "tvOnHdmi" || action === "switchHdmi";
@@ -39,8 +37,8 @@ export type CommandTvChoice = {
 };
 
 // The user-defined command list (Settings → Commands): one card per command. A command targets a
-// single TV (or "All TVs"). What the row then shows depends on that TV:
-//   • a CLOUD TV (or "All TVs") → an action dropdown (+ HDMI for the switch actions), as before.
+// single TV. What the row then shows depends on that TV:
+//   • a CLOUD TV → an action dropdown (+ HDMI for the switch actions), as before.
 //   • a LAN TV → a key-sequence text field (e.g. "HDMI, UP, UP, LEFT"), run instead of an action —
 //     there's no SmartThings action channel over the LAN.
 // Every row also has a hotkey field, an eye (pin to Main screen), a ▶ Run, and a delete.
@@ -70,21 +68,18 @@ export function CommandList({
   const [runningId, setRunningId] = useState<string | null>(null);
 
   const choiceById = new Map(tvChoices.map((c) => [c.deviceId, c] as const));
-  // The TV-target dropdown options: "All TVs" first, then each known TV (with a LAN/Cloud hint so
-  // the mode is obvious). A checked-but-vanished id is appended as "(gone)" so it can be re-picked
-  // away rather than silently sticking to the command.
+  // The TV-target dropdown options: each known TV (with a LAN/Cloud hint so the mode is obvious).
+  // A checked-but-vanished id is appended as "(gone)" so it can be re-picked away rather than
+  // silently sticking to the command.
   const tvOptions = (cmd: CommandSettings): SelectMenuOption[] => {
-    const opts: SelectMenuOption[] = [
-      { value: ALL_TVS, label: "All TVs" },
-      ...tvChoices.map((c) => {
-        const tag = c.isLocal ? "LAN" : "Cloud";
-        // Don't double the tag when the TV's own name already ends with it (e.g. "Office TV (LAN)").
-        const label = c.label.trim().toLowerCase().endsWith(`(${tag.toLowerCase()})`)
-          ? c.label
-          : `${c.label} (${tag})`;
-        return { value: c.deviceId, label };
-      }),
-    ];
+    const opts: SelectMenuOption[] = tvChoices.map((c) => {
+      const tag = c.isLocal ? "LAN" : "Cloud";
+      // Don't double the tag when the TV's own name already ends with it (e.g. "Office TV (LAN)").
+      const label = c.label.trim().toLowerCase().endsWith(`(${tag.toLowerCase()})`)
+        ? c.label
+        : `${c.label} (${tag})`;
+      return { value: c.deviceId, label };
+    });
     const current = cmd.deviceIds[0];
     if (current && !choiceById.has(current)) opts.push({ value: current, label: `${current} (gone)` });
     return opts;
@@ -112,16 +107,18 @@ export function CommandList({
       // A stable id for React keys, run/delete identity, and persistence.
       id: crypto.randomUUID(),
       action: "tvOn",
-      deviceIds: [],
+      // Default to the first known TV; with none configured yet the target stays unset until the
+      // user picks one.
+      deviceIds: tvChoices[0] ? [tvChoices[0].deviceId] : [],
       hdmi: "",
       keySeq: "",
       hotkey: "",
       pinned: false,
     });
 
-  // Change a command's single TV target. "All TVs" clears it; picking a TV stores just that id.
+  // Change a command's single TV target: store just that id.
   const setTarget = (cmd: CommandSettings, value: string) => {
-    onChange(cmd.id, { deviceIds: value === ALL_TVS ? [] : [value] });
+    onChange(cmd.id, { deviceIds: [value] });
   };
 
   return (
@@ -142,19 +139,31 @@ export function CommandList({
               <SelectMenu
                 className="command-tvs-select"
                 ariaLabel="TV this command targets"
-                value={target && !choiceById.has(target) ? target : (target ?? ALL_TVS)}
+                // A legacy no-target command (the removed "All TVs" mode) shows a blank trigger
+                // until the user picks a TV.
+                value={target ?? ""}
                 options={tvOptions(cmd)}
                 onValueChange={(v) => setTarget(cmd, v)}
               />
               {isKeySeq ? (
-                // LAN target → a raw key-sequence field replaces the action/HDMI dropdowns.
-                <TextInput
-                  className="command-keyseq"
-                  aria-label="Key sequence"
-                  placeholder="e.g. HDMI, UP, UP, LEFT"
-                  value={cmd.keySeq}
-                  onValueChange={(v) => onChange(cmd.id, { keySeq: v })}
-                />
+                // LAN target → a raw key-sequence field replaces the action/HDMI dropdowns, with a
+                // grouped key picker beside it that appends the clicked key to the sequence.
+                <>
+                  <TextInput
+                    className="command-keyseq"
+                    aria-label="Key sequence"
+                    placeholder="e.g. HDMI, UP, UP, LEFT"
+                    value={cmd.keySeq}
+                    onValueChange={(v) => onChange(cmd.id, { keySeq: v })}
+                  />
+                  <GroupSelect
+                    className="command-keyseq-picker"
+                    ariaLabel="Add a remote key to the sequence"
+                    triggerLabel="Add key"
+                    groups={REMOTE_KEY_GROUPS}
+                    onSelect={(token) => onChange(cmd.id, { keySeq: appendKeyToken(cmd.keySeq, token) })}
+                  />
+                </>
               ) : (
                 <>
                   <SelectMenu

@@ -491,7 +491,7 @@ export function SettingsView({
           </SettingsGroup>
           <SettingsGroup title="Commands">
             <p className="hint">
-              Your own commands: pick the TV it targets (or “All TVs”). A cloud TV runs an action
+              Your own commands: pick the TV it targets. A cloud TV runs an action
               (and an HDMI input for the switch actions); a LAN TV runs a key sequence you type
               instead. Optionally bind a hotkey, then run it with ▶. Toggle the eye to add it as a
               button on the Main screen.

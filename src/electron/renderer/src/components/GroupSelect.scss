@@ -1,0 +1,85 @@
+/* Grouped action picker matching SelectMenu's trigger + floating panel look (SelectMenu.scss),
+   without the value/sizer machinery — the trigger label is static. */
+.groupselect {
+  position: relative;
+  display: inline-flex;
+
+  .groupselect-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    white-space: nowrap;
+
+    &:hover:not(:disabled) {
+      background: var(--btn-hover);
+    }
+
+    &:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .chev {
+      flex: none;
+      color: var(--muted);
+      transition: transform 0.15s ease;
+
+      &.open {
+        transform: rotate(180deg);
+      }
+    }
+  }
+
+  .groupselect-panel {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 100%;
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px var(--depth);
+  }
+
+  /* Sticky so the current group's name stays visible while its options scroll by. */
+  .groupselect-heading {
+    position: sticky;
+    top: -4px; /* cancel the panel's padding so the heading pins flush to the top edge */
+    padding: 6px 8px 2px;
+    background: var(--panel);
+    color: var(--muted);
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .groupselect-option {
+    display: block;
+    width: 100%;
+    margin: 0;
+    padding: 8px 8px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+
+    &:hover {
+      background: var(--btn-hover);
+    }
+  }
+}
