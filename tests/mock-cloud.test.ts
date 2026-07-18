@@ -22,7 +22,8 @@ vi.mock("../src/config.js", () => ({
 vi.mock("electron", () => ({ BrowserWindow: class {} }));
 
 import { FakeCloud, installMockCloud } from "../src/dev/mock-cloud.js";
-import { makeMockTransport } from "../src/dev/mock-transport.js";
+import { FakeTransport, makeMockTransport } from "../src/dev/mock-transport.js";
+import type { TVConfig } from "../src/config.js";
 import { MOCK_DEVICES, MOCK_LOCAL_DEVICE_ID } from "../src/dev/fixtures.js";
 import { parseStatus, type RawStatus } from "../src/domain/tv.js";
 import { createApp } from "../src/app.js";
@@ -141,6 +142,27 @@ describe("mock-mode auth", () => {
     const signedOut = await makeMockTransport().listDevices();
     expect(signedOut.map((t) => t.deviceId)).toEqual([MOCK_LOCAL_DEVICE_ID]);
     expect(signedOut.every((t) => t.source === "local")).toBe(true);
+  });
+});
+
+describe("FakeTransport key sequences", () => {
+  it("honors the per-TV keyDelay between keys, like LocalTV.sendKeys", async () => {
+    const config: TVConfig = {
+      pcInput: "HDMI2",
+      deviceConfigs: { [MOCK_LOCAL_DEVICE_ID]: { keyDelay: 0.05 } },
+    };
+    const transport = new FakeTransport(undefined, () => 0, config);
+    const start = Date.now();
+    await transport.sendKeys(MOCK_LOCAL_DEVICE_ID, ["KEY_UP", "KEY_DOWN", "KEY_ENTER"]);
+    // Two inter-key waits of 50ms each (no wait after the last key), zero fake latency.
+    expect(Date.now() - start).toBeGreaterThanOrEqual(100);
+  });
+
+  it("uses default pacing (no extra wait) when no keyDelay is configured", async () => {
+    const transport = new FakeTransport(undefined, () => 0);
+    const start = Date.now();
+    await transport.sendKeys(MOCK_LOCAL_DEVICE_ID, ["KEY_UP", "KEY_DOWN", "KEY_ENTER"]);
+    expect(Date.now() - start).toBeLessThan(50);
   });
 });
 

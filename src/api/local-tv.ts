@@ -281,6 +281,7 @@ export class LocalTV implements TVTransport {
           await this.sleepFn(delayMs);
         }
       }
+      log(`  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`);
     } finally {
       conn.close();
     }

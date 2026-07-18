@@ -7,6 +7,8 @@
 import { parseStatus, mainCapabilities } from "../domain/tv.js";
 import type { STDevice, TVStatus } from "../domain/tv.js";
 import type { TVTransport } from "../api/transport.js";
+import { keyDelayMs } from "../api/local-tv.js";
+import type { TVConfig } from "../config.js";
 import { log } from "../log.js";
 import { FakeTVState, isMockAuthorized } from "./mock-cloud.js";
 
@@ -18,6 +20,9 @@ export class FakeTransport implements TVTransport {
   constructor(
     private readonly tvState: FakeTVState = new FakeTVState(),
     private readonly latencyMs: () => number = () => 20 + Math.random() * 40,
+    // The active config, so mock key sequences honor the per-TV keyDelay like LocalTV.sendKeys
+    // (without it, a configured delay silently doesn't apply in mock mode).
+    private readonly config?: TVConfig,
   ) {}
 
   private async delay(): Promise<void> {
@@ -49,11 +54,18 @@ export class FakeTransport implements TVTransport {
   async sendKeys(deviceId: string, keys: string[]): Promise<void> {
     // No real remote here — log each key as it "goes out", mirroring LocalTV.sendKeys' one-at-a-time
     // send (a per-key delay), so `npm run electron:dev:mock` shows the sequence step-by-step.
+    // The TV's keyDelay applies too, so the configured interval is observable in mock mode.
+    const delayMs = keyDelayMs(this.config?.deviceConfigs?.[deviceId] ?? {});
     log(`Mock TV ${deviceId} received keys: ${keys.join(", ")}`);
     for (let i = 0; i < keys.length; i++) {
       await this.delay();
       log(`  → key ${i + 1}/${keys.length}: ${keys[i]}`);
+      if (delayMs > 0 && i < keys.length - 1) {
+        log(`  … waiting ${delayMs / 1000}s`);
+        await sleep(delayMs);
+      }
     }
+    log(`  ✓ sequence sent (${keys.length} key${keys.length === 1 ? "" : "s"}, interval ${delayMs / 1000}s)`);
   }
 
   async listDevices(): Promise<STDevice[]> {
@@ -82,7 +94,7 @@ export class FakeTransport implements TVTransport {
 // per-invocation transports (matching the fake cloud, whose FakeCloud is also long-lived).
 let sharedState: FakeTVState | undefined;
 
-export function makeMockTransport(): TVTransport {
+export function makeMockTransport(config?: TVConfig): TVTransport {
   sharedState ??= new FakeTVState();
-  return new FakeTransport(sharedState);
+  return new FakeTransport(sharedState, undefined, config);
 }

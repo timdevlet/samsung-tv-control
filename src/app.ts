@@ -159,7 +159,7 @@ export function createApp(): App {
   // still short-circuits to one in-process fake so `npm run electron:dev:mock` and tests never
   // touch the real cloud or LAN.
   async function buildTransport(config: TVConfig): Promise<TVTransport> {
-    if (isMockMode()) return makeMockTransport();
+    if (isMockMode()) return makeMockTransport(config);
     return new RoutingTransport(config, resolveAccessToken);
   }
 
