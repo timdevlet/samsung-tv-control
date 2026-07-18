@@ -300,8 +300,12 @@ export function normalizeCommands(value: unknown): CommandConfig[] {
     ];
     if (deviceIds.length > 0) cmd.deviceIds = deviceIds;
     if (commandUsesHdmi(cmd.action)) {
-      const hdmi = typeof entry.hdmi === "string" ? entry.hdmi.trim().toUpperCase() : "";
-      cmd.hdmi = (COMMAND_HDMI_INPUTS as readonly string[]).includes(hdmi) ? hdmi : "HDMI1";
+      const raw = typeof entry.hdmi === "string" ? entry.hdmi.trim() : "";
+      // A known HDMI input is normalized to its canonical upper-case id; any other non-empty value
+      // is a custom input name/alias (e.g. "pc") kept verbatim so it can be matched by label or
+      // mapped by the LAN transport. Empty falls back to HDMI1.
+      const known = (COMMAND_HDMI_INPUTS as readonly string[]).includes(raw.toUpperCase());
+      cmd.hdmi = known ? raw.toUpperCase() : raw || "HDMI1";
     }
     if (typeof entry.hotkey === "string" && entry.hotkey.trim()) cmd.hotkey = entry.hotkey.trim();
     if (entry.pinned === true) cmd.pinned = true;

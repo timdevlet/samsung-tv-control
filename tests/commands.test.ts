@@ -52,15 +52,26 @@ describe("normalizeCommands", () => {
     ).toEqual([{ id: "b", action: "tvOff" }]);
   });
 
-  it("defaults an HDMI action's missing/invalid hdmi to HDMI1 and uppercases valid ones", () => {
+  it("defaults an HDMI action's missing hdmi to HDMI1 and uppercases known HDMI inputs", () => {
     expect(normalizeCommands([{ id: "a", action: "switchHdmi" }])).toEqual([
       { id: "a", action: "switchHdmi", hdmi: "HDMI1" },
     ]);
-    expect(normalizeCommands([{ id: "a", action: "switchHdmi", hdmi: "HDMI9" }])).toEqual([
+    expect(normalizeCommands([{ id: "a", action: "switchHdmi", hdmi: "   " }])).toEqual([
       { id: "a", action: "switchHdmi", hdmi: "HDMI1" },
     ]);
     expect(normalizeCommands([{ id: "a", action: "tvOnHdmi", hdmi: " hdmi4 " }])).toEqual([
       { id: "a", action: "tvOnHdmi", hdmi: "HDMI4" },
+    ]);
+  });
+
+  it("keeps a custom input alias (non-standard hdmi value) verbatim", () => {
+    // A value that isn't one of HDMI1..HDMI5 is a user-typed input name (e.g. "pc") and is
+    // preserved as-is — matched by label on the cloud path, mapped by the LAN transport.
+    expect(normalizeCommands([{ id: "a", action: "switchHdmi", hdmi: "pc" }])).toEqual([
+      { id: "a", action: "switchHdmi", hdmi: "pc" },
+    ]);
+    expect(normalizeCommands([{ id: "a", action: "tvOnHdmi", hdmi: " KEY_HDMI2 " }])).toEqual([
+      { id: "a", action: "tvOnHdmi", hdmi: "KEY_HDMI2" },
     ]);
   });
 

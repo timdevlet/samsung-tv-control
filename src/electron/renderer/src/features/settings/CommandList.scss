@@ -25,6 +25,13 @@
       flex: 1;
       min-width: 0;
     }
+
+    /* Free-text custom input name (shown when "Custom…" is picked). Kept compact so the row
+       layout matches the fixed HDMI dropdown it replaces. */
+    .command-hdmi-custom {
+      width: 120px;
+      min-width: 0;
+    }
   }
 
   .command-tvs {

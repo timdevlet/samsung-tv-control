@@ -204,6 +204,27 @@ describe("LocalTV", () => {
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_SOURCE"]);
   });
 
+  it("setInputSource maps the friendly 'pc' alias to its HDMI key", async () => {
+    const ws = new FakeWS();
+    await new LocalTV(config, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }).setInputSource("local:tv", "local.remoteKey", "pc");
+    // "PC" has no direct KEY_ and no LAN source map to resolve it, so it aliases to the
+    // conventional PC port (HDMI2) instead of just opening the source menu.
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI2"]);
+  });
+
+  it("setInputSource sends a custom KEY_ value through unchanged", async () => {
+    const ws = new FakeWS();
+    await new LocalTV(config, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }).setInputSource("local:tv", "local.remoteKey", "key_hdmi3");
+    // A custom input typed as a raw remote key is normalized to upper case and sent as-is.
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI3"]);
+  });
+
   it("getStatus reports on when the info endpoint answers, off when it doesn't", async () => {
     const localTv = new LocalTV(config);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("{}", { status: 200 })));

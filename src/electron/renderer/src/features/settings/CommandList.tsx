@@ -5,6 +5,7 @@ import { HotkeyField } from "../../components/HotkeyField";
 import { IconButton } from "../../components/IconButton";
 import { MultiSelect, type MultiSelectOption } from "../../components/MultiSelect";
 import { SelectMenu } from "../../components/SelectMenu";
+import { TextInput } from "../../components/TextInput";
 import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
 import type { ToastKind } from "../../lib/toasts";
 import "./CommandList.scss";
@@ -17,10 +18,20 @@ const ACTION_OPTIONS: readonly { value: CommandAction; label: string }[] = [
   { value: "switchHdmi", label: "Switch HDMI" },
 ];
 
-const HDMI_OPTIONS = (["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const).map((v, i) => ({
-  value: v,
-  label: `HDMI ${i + 1}`,
-}));
+const HDMI_INPUTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const;
+
+// Sentinel value the HDMI dropdown uses for the "Custom…" row — not a real input id, so it can't
+// collide with a typed alias. When selected, a text field appears for a free-text input name.
+const CUSTOM_HDMI = "__custom__";
+
+const HDMI_OPTIONS = [
+  ...HDMI_INPUTS.map((v, i) => ({ value: v, label: `HDMI ${i + 1}` })),
+  { value: CUSTOM_HDMI, label: "Custom…" },
+];
+
+// An hdmi value that isn't one of the fixed HDMI inputs is a custom alias (e.g. "pc"), so the row
+// shows the "Custom…" option plus a text field. Empty is the unset default, not custom.
+const isCustomHdmi = (hdmi: string) => hdmi !== "" && !(HDMI_INPUTS as readonly string[]).includes(hdmi);
 
 // Mirrors commandUsesHdmi in src/domain/config.ts — duplicated so the sandboxed renderer keeps
 // importing only types from the node-side modules.
@@ -58,6 +69,17 @@ export function CommandList({
   // Id of the command currently running; every Run button is disabled meanwhile (the daemon's
   // trigger gate would reject a concurrent run anyway — don't offer one).
   const [runningId, setRunningId] = useState<string | null>(null);
+  // Command ids whose HDMI selector is in "Custom…" mode but still empty (the user picked Custom
+  // and hasn't typed yet). Once a value is typed, isCustomHdmi(hdmi) keeps the field open on its
+  // own, so this only tracks the transient empty state — hdmi="" would otherwise read as unset.
+  const [customPending, setCustomPending] = useState<ReadonlySet<string>>(new Set());
+  const setPending = (id: string, on: boolean) =>
+    setCustomPending((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
 
   const run = async (cmd: CommandSettings) => {
     setRunningId(cmd.id);
@@ -137,15 +159,42 @@ export function CommandList({
                   });
                 }}
               />
-              {hdmiEnabled && (
-                <SelectMenu
-                  ariaLabel="HDMI input"
-                  className="command-hdmi"
-                  value={cmd.hdmi || "HDMI1"}
-                  options={HDMI_OPTIONS}
-                  onValueChange={(v) => onChange(cmd.id, { hdmi: v })}
-                />
-              )}
+              {hdmiEnabled &&
+                (() => {
+                  // The row is in custom mode when it holds a non-standard value, or the user just
+                  // picked "Custom…" and hasn't typed yet (tracked in customPending).
+                  const custom = isCustomHdmi(cmd.hdmi) || customPending.has(cmd.id);
+                  return (
+                    <>
+                      <SelectMenu
+                        ariaLabel="HDMI input"
+                        className="command-hdmi"
+                        value={custom ? CUSTOM_HDMI : cmd.hdmi || "HDMI1"}
+                        options={HDMI_OPTIONS}
+                        onValueChange={(v) => {
+                          if (v === CUSTOM_HDMI) {
+                            // Enter custom mode; keep any existing custom text, clear a fixed HDMI.
+                            setPending(cmd.id, true);
+                            if (!isCustomHdmi(cmd.hdmi)) onChange(cmd.id, { hdmi: "" });
+                          } else {
+                            // A fixed HDMI input replaces whatever was there and leaves custom mode.
+                            setPending(cmd.id, false);
+                            onChange(cmd.id, { hdmi: v });
+                          }
+                        }}
+                      />
+                      {custom && (
+                        <TextInput
+                          className="command-hdmi-custom"
+                          aria-label="Custom input name"
+                          placeholder="Input name (e.g. pc)"
+                          value={cmd.hdmi}
+                          onValueChange={(v) => onChange(cmd.id, { hdmi: v })}
+                        />
+                      )}
+                    </>
+                  );
+                })()}
               {/* Keyed by row so a deleted row's in-progress capture can't land on its neighbor. */}
               <HotkeyField
                 key={`hotkey-${cmd.id}`}
