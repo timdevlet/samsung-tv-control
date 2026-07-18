@@ -25,43 +25,33 @@
   margin-right: auto;
 }
 
-/* The TV-control tab bar ("All TVs" + one per TV). TV labels are user-defined and can be long,
-   so let the segments wrap instead of overflowing the 640px column. */
-.tv-tabs {
-  margin-bottom: 16px;
-
-  .segmented {
-    flex-wrap: wrap;
-
-    button { flex: 0 0 auto; }
-  }
-
-  /* A per-TV tab label carrying a "Cloud" badge for SmartThings-listed TVs. */
-  .tab-label {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  /* "Cloud" pill inside a tab. Uses currentColor so it reads correctly on both the plain and the
-     active (accent-filled) segment without a second rule. */
-  .source-badge {
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    border: 1px solid currentColor;
-    border-radius: 999px;
-    padding: 0 5px;
-    opacity: 0.85;
-  }
-}
-
 /* Subtle build-version line at the very bottom of the settings body. */
 p.app-version { 
   text-align: right;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* The TV control group's two-column body: the TV list on the left, the selected TV's parameters
+   (or the Add-a-TV pairing form) on the right. Collapses to a single column on narrow windows. */
+.tv-control-columns {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 20px;
+  align-items: start;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+
+  /* Keep the panel from collapsing under its content and let inputs shrink inside the grid. */
+  .tv-control-panel {
+    min-width: 0;
+
+    > p.hint:last-child {
+      margin-bottom: 0;
+    }
+  }
 }
 
 /* Local-transport pairing controls: the Discover/Pair buttons and the paired-state label on one

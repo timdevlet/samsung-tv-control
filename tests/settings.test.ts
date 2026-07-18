@@ -34,9 +34,18 @@ describe("deviceConfigs in getSettings", () => {
         host: "",
         mac: "",
         inputKeySeq: "",
+        keyDelay: "",
         paired: false,
+        autoWake: true,
       },
     });
+  });
+
+  it("exposes autoWake as true when unset and false when the opt-out is stored", async () => {
+    store.deviceConfigs = { tv1: { alias: "On by default" }, tv2: { alias: "Opted out", autoWake: false } };
+    const settings = await getSettings();
+    expect(settings.deviceConfigs.tv1.autoWake).toBe(true);
+    expect(settings.deviceConfigs.tv2.autoWake).toBe(false);
   });
 });
 
@@ -107,10 +116,35 @@ describe("deviceConfigs in saveSettings", () => {
     store.deviceConfigs = { tv1: { alias: "65 TV", pcInput: "HDMI3" } };
     await saveSettings({
       deviceConfigs: {
-        tv1: { alias: "Renamed", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
+        tv1: { alias: "Renamed", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: true },
       },
     });
     expect(store.deviceConfigs).toEqual({ tv1: { alias: "Renamed", pcInput: "HDMI3" } });
+  });
+
+  it("persists only the autoWake opt-out: saving false stores it, saving true leaves it absent", async () => {
+    await saveSettings({
+      deviceConfigs: {
+        tv1: { alias: "TV", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: false },
+      },
+    });
+    expect(store.deviceConfigs).toEqual({ tv1: { alias: "TV", autoWake: false } });
+
+    await saveSettings({
+      deviceConfigs: {
+        tv1: { alias: "TV", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: true },
+      },
+    });
+    expect(store.deviceConfigs).toEqual({ tv1: { alias: "TV" } });
+  });
+
+  it("keeps an entry alive when the opt-out is its only remaining setting", async () => {
+    await saveSettings({
+      deviceConfigs: {
+        tv1: { alias: "", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: false },
+      },
+    });
+    expect(store.deviceConfigs).toEqual({ tv1: { autoWake: false } });
   });
 });
 
@@ -122,8 +156,8 @@ describe("commands in getSettings/saveSettings", () => {
     ];
     const settings = await getSettings();
     expect(settings.commands).toEqual([
-      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3", pinned: true },
-      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", hotkey: "", pinned: false },
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", keySeq: "", hotkey: "Command+Control+3", pinned: true },
+      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", keySeq: "", hotkey: "", pinned: false },
     ]);
   });
 
@@ -149,35 +183,6 @@ describe("commands in getSettings/saveSettings", () => {
   });
 });
 
-describe("mainButtons in getSettings/saveSettings", () => {
-  it("defaults to all three shown when unset", async () => {
-    const settings = await getSettings();
-    expect(settings.mainButtons).toEqual({ on: true, off: true, offSleep: true });
-  });
-
-  it("exposes stored values, defaulting missing keys back to shown", async () => {
-    store.mainButtons = { off: false };
-    const settings = await getSettings();
-    expect(settings.mainButtons).toEqual({ on: true, off: false, offSleep: true });
-  });
-
-  it("persists a normalized full record on save", async () => {
-    await saveSettings({ mainButtons: { on: true, off: false, offSleep: false } });
-    expect(store.mainButtons).toEqual({ on: true, off: false, offSleep: false });
-  });
-
-  it("normalizes a malformed payload rather than corrupting the config", async () => {
-    await saveSettings({ mainButtons: { off: false, bogus: 1 } as never });
-    expect(store.mainButtons).toEqual({ on: true, off: false, offSleep: true });
-  });
-
-  it("leaves the stored value untouched when mainButtons is absent", async () => {
-    store.mainButtons = { on: false };
-    await saveSettings({ minimizeToTrayOnClose: false });
-    expect(store.mainButtons).toEqual({ on: false });
-  });
-});
-
 describe("LAN device fields", () => {
   it("canonicalizes the MAC and exposes host/mac/inputKeySeq, never wsToken", async () => {
     store.deviceConfigs = {
@@ -192,6 +197,39 @@ describe("LAN device fields", () => {
     });
     // The token itself must never reach the renderer.
     expect(settings.deviceConfigs["local:tv"]).not.toHaveProperty("wsToken");
+  });
+
+  it("round-trips keyDelay: form string in, clamped number stored, string back out", async () => {
+    await saveSettings({
+      deviceConfigs: {
+        "local:tv": {
+          alias: "", description: "", host: "1.2.3.4", mac: "", inputKeySeq: "",
+          keyDelay: "2.5", paired: false, autoWake: true,
+        },
+      },
+    });
+    expect(store.deviceConfigs).toEqual({ "local:tv": { host: "1.2.3.4", keyDelay: 2.5 } });
+    expect((await getSettings()).deviceConfigs["local:tv"].keyDelay).toBe("2.5");
+
+    // Out-of-range entry clamps to the 5s cap; clearing the field removes the stored value.
+    await saveSettings({
+      deviceConfigs: {
+        "local:tv": {
+          alias: "", description: "", host: "1.2.3.4", mac: "", inputKeySeq: "",
+          keyDelay: "7", paired: false, autoWake: true,
+        },
+      },
+    });
+    expect(store.deviceConfigs!["local:tv"].keyDelay).toBe(5);
+    await saveSettings({
+      deviceConfigs: {
+        "local:tv": {
+          alias: "", description: "", host: "1.2.3.4", mac: "", inputKeySeq: "",
+          keyDelay: "", paired: false, autoWake: true,
+        },
+      },
+    });
+    expect(store.deviceConfigs).toEqual({ "local:tv": { host: "1.2.3.4" } });
   });
 
   it("preserves the stored wsToken across a whole-map save that omits it", async () => {

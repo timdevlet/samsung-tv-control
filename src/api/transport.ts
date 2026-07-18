@@ -18,6 +18,10 @@ export interface TVTransport {
   // Switch the input. `capability` is the id from getStatus().inputCapability (the LAN transport
   // uses a sentinel it recognizes); `source` is the resolved input id (e.g. "HDMI2").
   setInputSource(deviceId: string, capability: string, source: string): Promise<void>;
+  // Send an explicit ordered remote-key sequence to the TV (e.g. ["KEY_HDMI","KEY_UP","KEY_LEFT"]).
+  // Keys are already normalized to Samsung KEY_* ids by the caller. This is a LAN-only capability —
+  // there's no raw-key channel over the SmartThings cloud, so the cloud transport rejects it.
+  sendKeys(deviceId: string, keys: string[]): Promise<void>;
   // All devices on the "account" (cloud) or configured locally (LAN), for the device list.
   // Callers derive the TV subset with domain/tv.ts's isTV/pickTV — filtering is not a per-
   // transport concern, so the interface stays one method per actual I/O shape.

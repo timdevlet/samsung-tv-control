@@ -7,14 +7,13 @@
 
 import { loadConfig, updateConfig, type TVConfig } from "../config.js";
 import {
+  commandIsKeySeq,
   commandUsesHdmi,
   normalizeCommands,
   normalizeDeviceConfigs,
-  normalizeMainButtons,
   normalizeTheme,
   THEME_PREFERENCES,
   type CommandAction,
-  type MainButtons,
   type ThemePreference,
 } from "../domain/config.js";
 import { DEFAULT_REDIRECT_URI } from "../api/oauth.js";
@@ -28,15 +27,13 @@ export interface AppSettings {
   redirectUri: string;
   // When true, closing the window hides to the tray; when false, it quits the app.
   minimizeToTrayOnClose: boolean;
-  // Device ids of the TVs "All TVs" commands (and the Main-screen buttons) target, chosen from
-  // the account's TV list. Empty = none.
+  // Device ids of the TVs "All TVs" commands target, chosen from the account's TV list.
+  // Empty = none.
   selectedDeviceIds: string[];
   // Per-TV settings keyed by deviceId: alias/description and the LAN fields.
   deviceConfigs: Record<string, DeviceConfigSettings>;
   // App color theme: "light", "dark", or "system" (follow the OS setting).
   theme: ThemePreference;
-  // Which built-in power buttons the Main screen shows (each defaults to true).
-  mainButtons: MainButtons;
   // User-defined command list (Settings → Commands), in stored order.
   commands: CommandSettings[];
 }
@@ -46,10 +43,14 @@ export interface AppSettings {
 export interface CommandSettings {
   id: string;
   action: CommandAction;
-  // The TVs this command targets (checkboxes); [] = every TV selected in Settings.
+  // The TV this command targets; [] = every TV selected in Settings. The UI picks a single TV, so
+  // this holds at most one id.
   deviceIds: string[];
-  // "" for actions that don't switch inputs; "HDMI1".."HDMI5" otherwise.
+  // "" for actions that don't switch inputs; "HDMI1".."HDMI5" otherwise (cloud target).
   hdmi: string;
+  // Comma-separated remote-key sequence run when the target is a LAN TV (used instead of action).
+  // "" for a cloud/all-TVs command.
+  keySeq: string;
   // Electron accelerator; "" = no hotkey (run from the list only).
   hotkey: string;
   // When true, the command is shown as a button on the Main screen. Always present (defaults to
@@ -65,9 +66,15 @@ export interface DeviceConfigSettings {
   mac: string;
   // Optional comma-separated remote-key sequence for reaching the PC input over LAN.
   inputKeySeq: string;
+  // Extra seconds between the keys of a sequence sent to this TV, as the form string ("" = unset,
+  // default pacing). Coerced/clamped to a number (0–5) by normalizeDeviceConfigs on save.
+  keyDelay: string;
   // Read-only in the UI: true once a LAN pairing token is stored. The token itself is never sent
   // to the renderer (a secret) — only this flag.
   paired: boolean;
+  // Whether the daemon's automatic power-on (PC resume / boot) acts on this TV. Default true;
+  // only the opt-out (`false`) is persisted.
+  autoWake: boolean;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -88,20 +95,23 @@ export async function getSettings(): Promise<AppSettings> {
           host: cfg.host ?? "",
           mac: cfg.mac ?? "",
           inputKeySeq: cfg.inputKeySeq ?? "",
+          keyDelay: cfg.keyDelay != null ? String(cfg.keyDelay) : "",
           // Expose only whether a pairing token exists — never the token itself.
           paired: Boolean(cfg.wsToken),
+          autoWake: cfg.autoWake !== false,
         },
       ]),
     ),
     // Defaults to dark (the historical appearance) when unset or invalid.
     theme: normalizeTheme(config.theme),
-    // Each button defaults to on when unset — the historical "all three shown" Main screen.
-    mainButtons: normalizeMainButtons(config.mainButtons),
     commands: normalizeCommands(config.commands).map((cmd) => ({
       id: cmd.id,
       action: cmd.action,
       deviceIds: cmd.deviceIds ?? [],
-      hdmi: commandUsesHdmi(cmd.action) ? cmd.hdmi ?? "HDMI1" : "",
+      // hdmi applies to a cloud switch action; keySeq to a LAN target. They're mutually exclusive
+      // (a command targets one TV, which is one or the other).
+      hdmi: !commandIsKeySeq(cmd) && commandUsesHdmi(cmd.action) ? cmd.hdmi ?? "HDMI1" : "",
+      keySeq: commandIsKeySeq(cmd) ? cmd.keySeq ?? "" : "",
       hotkey: cmd.hotkey ?? "",
       pinned: cmd.pinned ?? false,
     })),
@@ -161,11 +171,6 @@ function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
   // Only the three known values are accepted — a malformed IPC payload can't corrupt the config.
   if (THEME_PREFERENCES.includes(partial.theme as ThemePreference)) {
     config.theme = partial.theme;
-  }
-  // Normalized to a full record (each key on unless explicitly false), so a malformed payload
-  // can't corrupt the config and a missing button key defaults back to shown.
-  if (typeof partial.mainButtons === "object" && partial.mainButtons !== null) {
-    config.mainButtons = normalizeMainButtons(partial.mainButtons);
   }
   // Whole-list replace, like deviceConfigs: the renderer always sends the complete list, and an
   // empty array is meaningful (the user deleted every command). Malformed entries are dropped by

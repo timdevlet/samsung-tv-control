@@ -11,6 +11,7 @@
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
+  max-width: 190px;
 
   /* The capture surface — transparent/borderless; the box's look comes from .hotkey above. It just
      provides the click target and lays the keycap chips out centered. The 8px vertical padding

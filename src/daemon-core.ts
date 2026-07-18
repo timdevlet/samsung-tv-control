@@ -21,7 +21,7 @@ import {
   type HotkeyTarget,
   type Platform,
 } from "./domain/daemon.js";
-import { commandLabel, normalizeCommands, type CommandConfig } from "./domain/config.js";
+import { commandIsKeySeq, commandLabel, normalizeCommands, type CommandConfig } from "./domain/config.js";
 import { onWake } from "./os/wake-watch.js";
 import { sleepPc, uptimeSeconds } from "./os/pc-sleep.js";
 import { isMockMode } from "./dev/mock-cloud.js";
@@ -60,6 +60,9 @@ export interface Daemon {
   // Run one user-defined command (Settings → Commands): its action against its own TV, or every
   // selected TV when the command targets "All TVs".
   triggerCommand(cmd: CommandConfig): Promise<ActionResult>;
+  // Send an explicit remote-key sequence to one LAN TV (Settings → the per-TV "Run key sequence"
+  // button). LAN-only — a cloud id is rejected before any transport work.
+  sendKeys(deviceId: string, keys: string[]): Promise<ActionResult>;
   // Re-read the command list and re-register its hotkeys. Called after Settings saves so a
   // changed combo takes effect without restarting the daemon.
   reloadHotkeys(): Promise<void>;
@@ -202,6 +205,14 @@ export async function startDaemon(): Promise<Daemon> {
   // triggers so gating/logging/results stay uniform.
   async function triggerCommand(cmd: CommandConfig): Promise<ActionResult> {
     const label = `Command "${commandLabel(cmd)}"`;
+    // A LAN-targeted command runs its raw key sequence instead of a cloud action (its single target
+    // is a `local:` TV). Split the stored sequence into tokens; triggerSendKeys normalizes them to
+    // KEY_* and gate-guards the send.
+    if (commandIsKeySeq(cmd)) {
+      const deviceId = cmd.deviceIds![0];
+      const tokens = (cmd.keySeq ?? "").split(",").map((k) => k.trim()).filter(Boolean);
+      return triggerSendKeys(deviceId, tokens);
+    }
     // undefined = the Settings selection; a targeted command carries its explicit ids.
     const ids = cmd.deviceIds?.length ? cmd.deviceIds : undefined;
     const target: HotkeyTarget | undefined = ids
@@ -219,6 +230,20 @@ export async function startDaemon(): Promise<Daemon> {
       case "switchHdmi":
         return runSimple(label, () => app.switchInputOnly(cmd.hdmi ?? "HDMI1", ids));
     }
+  }
+
+  // Send an explicit remote-key sequence to one TV (Settings → "Run key sequence"). Guards to LAN
+  // devices — a `local:<mac>` id (see the id convention in src/app.ts); a cloud id has no raw-key
+  // channel, so reject it here before app.sendKeys would hit the cloud transport's throw. Reuses
+  // the same busy gate as the other one-shot actions.
+  function triggerSendKeys(deviceId: string, keys: string[]): Promise<ActionResult> {
+    if (!deviceId.startsWith("local:")) {
+      return Promise.resolve({ ok: false, error: "Only LAN TVs can run a raw key sequence." });
+    }
+    if (keys.length === 0) {
+      return Promise.resolve({ ok: false, error: "Enter a key sequence first." });
+    }
+    return runSimple(`Send keys [${keys.join(", ")}]`, () => app.sendKeys(deviceId, keys));
   }
 
   // Re-read the command list. Hotkey values are taken as-is (the capture UI only ever produces
@@ -309,5 +334,13 @@ export async function startDaemon(): Promise<Daemon> {
     globalShortcut.unregisterAll();
   }
 
-  return { triggerOn, triggerOffAndSleep, triggerOff, triggerCommand, reloadHotkeys, stop };
+  return {
+    triggerOn,
+    triggerOffAndSleep,
+    triggerOff,
+    triggerCommand,
+    sendKeys: triggerSendKeys,
+    reloadHotkeys,
+    stop,
+  };
 }

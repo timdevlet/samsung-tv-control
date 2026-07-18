@@ -89,7 +89,9 @@ export default function App() {
         }
       />
 
-      {view === "main" && <PowerScreen onToast={toasts.push} />}
+      {view === "main" && (
+        <PowerScreen onToast={toasts.push} onOpenSettings={() => void openSettings()} />
+      )}
 
       {view === "settings" && settings && (
         <SettingsView

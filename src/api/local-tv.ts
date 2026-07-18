@@ -49,6 +49,17 @@ export interface MinimalWebSocket {
 }
 export type WebSocketFactory = (url: string) => MinimalWebSocket;
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// The per-TV extra pause between keys of a sequence, in ms. Clamped here (not just at the
+// settings bridge) because the daemon consumes raw loadConfig() output — a hand-edited config
+// can hold junk or out-of-range values. Junk/unset/≤0 → 0 (default pacing only).
+export function keyDelayMs(cfg: Pick<DeviceConfig, "keyDelay">): number {
+  const n = Number(cfg.keyDelay);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(5, n) * 1000;
+}
+
 // Send a Wake-on-LAN magic packet for `mac`, broadcast to port 9. `send` is injectable for tests.
 export async function sendWakeOnLan(
   mac: string,
@@ -212,6 +223,8 @@ export class LocalTV implements TVTransport {
   constructor(
     private readonly config: TVConfig,
     private readonly wsFactory: WebSocketFactory = defaultWsFactory,
+    // Injectable so tests can record/skip the inter-key waits.
+    private readonly sleepFn: (ms: number) => Promise<void> = sleep,
   ) {}
 
   private deviceConfig(deviceId: string): DeviceConfig {
@@ -249,14 +262,25 @@ export class LocalTV implements TVTransport {
     await this.sendKeys(deviceId, keys);
   }
 
-  // Open one WS, send the keys in order, close it.
-  private async sendKeys(deviceId: string, keys: string[]): Promise<void> {
+  // Open one WS, send the keys in order (one at a time, ~200ms apart — see connectRemote's send —
+  // plus the TV's optional keyDelay between keys), close it. Public so a "run this key sequence"
+  // action can reach it directly (via app.sendKeys), not only the input-switch path. Each keypress
+  // is logged as it goes out so the sequence is observable step-by-step in the log.
+  async sendKeys(deviceId: string, keys: string[]): Promise<void> {
     const cfg = this.deviceConfig(deviceId);
+    const delayMs = keyDelayMs(cfg);
     // A NO_TOKEN_PAIRED sentinel means "paired, connect without a token" — resolve it to undefined
     // so remoteUrl builds a token-less URL.
     const conn = await connectRemote(cfg.host!, wsTokenForConnect(cfg.wsToken), this.wsFactory);
     try {
-      for (const key of keys) await conn.send(key);
+      for (let i = 0; i < keys.length; i++) {
+        log(`  → key ${i + 1}/${keys.length}: ${keys[i]}`);
+        await conn.send(keys[i]);
+        if (delayMs > 0 && i < keys.length - 1) {
+          log(`  … waiting ${delayMs / 1000}s`);
+          await this.sleepFn(delayMs);
+        }
+      }
     } finally {
       conn.close();
     }
@@ -300,4 +324,33 @@ function defaultInputKey(source: string): string {
   if (numbered) return `KEY_HDMI${numbered[1]}`;
   if (/^hdmi/i.test(trimmed)) return "KEY_HDMI";
   return INPUT_KEY_ALIASES[trimmed.toLowerCase()] ?? "KEY_SOURCE";
+}
+
+// Normalize one token of a user-typed remote-key sequence (e.g. from a Settings key-sequence
+// field) into a Samsung Tizen KEY_* id. Shares the input-name rules with defaultInputKey — an
+// explicit KEY_* passes through upper-cased, numbered/bare HDMI and the "pc" alias map to their
+// keys — but for the standalone-sequence use case a *bare* word like "UP", "LEFT", "ENTER" is a
+// direct remote key, so it becomes KEY_<UPPER> (whereas defaultInputKey, which resolves an input
+// *source*, falls back to KEY_SOURCE for an unknown name). An empty/blank token yields "" so the
+// caller can drop it.
+export function normalizeRemoteKey(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return "";
+  if (/^KEY_[A-Z0-9_]+$/i.test(trimmed)) return trimmed.toUpperCase();
+  const numbered = /^hdmi\s*(\d+)$/i.exec(trimmed);
+  if (numbered) return `KEY_HDMI${numbered[1]}`;
+  if (/^hdmi$/i.test(trimmed)) return "KEY_HDMI";
+  const alias = INPUT_KEY_ALIASES[trimmed.toLowerCase()];
+  if (alias) return alias;
+  // A bare remote-key name → its KEY_ form (whitespace inside a token collapses to "_").
+  return `KEY_${trimmed.toUpperCase().replace(/\s+/g, "_")}`;
+}
+
+// Split a comma-separated key sequence (e.g. "HDMI, UP, UP, LEFT, DOWN") into normalized KEY_*
+// ids, dropping blank entries. Used by the standalone "run key sequence" action.
+export function parseKeySequence(seq: string): string[] {
+  return seq
+    .split(",")
+    .map((k) => normalizeRemoteKey(k))
+    .filter(Boolean);
 }

@@ -1,3 +1,4 @@
+import { Badge } from "../../components/Badge";
 import type { MultiSelectOption } from "../../components/MultiSelect";
 import type { DeviceConfigSettings } from "../../types";
 
@@ -38,7 +39,7 @@ export function deviceMultiSelectOptions(
       label: (
         <>
           {title}
-          {isCloud && <span className="source-badge">Cloud</span>}
+          {isCloud && <Badge>Cloud</Badge>}
         </>
       ),
       subtitle,

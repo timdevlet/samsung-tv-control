@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { pickInput, isOnInput, parseStatus, pickTV, isTV, mainCapabilities, type TVStatus } from "../src/domain/tv.js";
 import { parseHdmiFlag } from "../src/domain/cli.js";
 import { hasOAuthClient, authorizeUrl, isTokenFresh, applyTokens, EXPIRY_SKEW_MS } from "../src/domain/oauth.js";
-import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, normalizeTheme, normalizeMainButtons, wsTokenForConnect, NO_TOKEN_PAIRED, type TVConfig } from "../src/domain/config.js";
+import { mergeConfig, defaultConfig, resolveStaticToken, clearTokens, normalizeTheme, wsTokenForConnect, NO_TOKEN_PAIRED, normalizeDeviceConfigs, autoWakeEnabled, type TVConfig } from "../src/domain/config.js";
 import { hotkeyLabel, isWithinBootWindow, TriggerGate, WakeDetector, withRetry } from "../src/domain/daemon.js";
 
 const status = (over: Partial<TVStatus> = {}): TVStatus => ({ sources: [], ...over });
@@ -151,6 +151,10 @@ describe("config policy", () => {
     expect(merged).not.toHaveProperty("offHotkey");
     expect(merged).not.toHaveProperty("hotkeyBindings");
   });
+  it("drops the retired mainButtons key (the Main screen shows only pinned commands now)", () => {
+    const merged = mergeConfig({ mainButtons: { on: false } } as never);
+    expect(merged).not.toHaveProperty("mainButtons");
+  });
   it("defaultConfig is defaults only", () => {
     expect(defaultConfig()).toEqual({ pcInput: "HDMI2", minimizeToTrayOnClose: true });
   });
@@ -167,31 +171,6 @@ describe("config policy", () => {
     expect(normalizeTheme(undefined)).toBe("dark");
     expect(normalizeTheme("neon")).toBe("dark");
     expect(normalizeTheme(42)).toBe("dark");
-  });
-  it("normalizeMainButtons shows every button when unset or malformed", () => {
-    const all = { on: true, off: true, offSleep: true };
-    expect(normalizeMainButtons(undefined)).toEqual(all);
-    expect(normalizeMainButtons(null)).toEqual(all);
-    expect(normalizeMainButtons("garbage")).toEqual(all);
-    expect(normalizeMainButtons({})).toEqual(all);
-  });
-  it("normalizeMainButtons hides only the keys explicitly set to false", () => {
-    expect(normalizeMainButtons({ offSleep: false })).toEqual({
-      on: true,
-      off: true,
-      offSleep: false,
-    });
-    expect(normalizeMainButtons({ on: false, off: false, offSleep: false })).toEqual({
-      on: false,
-      off: false,
-      offSleep: false,
-    });
-    // A non-boolean value for a key is not `false`, so the button stays shown.
-    expect(normalizeMainButtons({ on: 0, off: "no" })).toEqual({
-      on: true,
-      off: true,
-      offSleep: true,
-    });
   });
   it("clearTokens drops tokens but keeps the OAuth client and preferences", () => {
     const signedIn: TVConfig = {
@@ -227,6 +206,37 @@ describe("config policy", () => {
     expect(wsTokenForConnect(NO_TOKEN_PAIRED)).toBeUndefined();
     expect(wsTokenForConnect(undefined)).toBeUndefined();
     expect(wsTokenForConnect("")).toBeUndefined();
+  });
+  it("normalizeDeviceConfigs persists only the autoWake opt-out (strict false)", () => {
+    expect(normalizeDeviceConfigs({ tv1: { alias: "TV", autoWake: false } })).toEqual({
+      tv1: { alias: "TV", autoWake: false },
+    });
+    // true is the default and junk values are untrusted — none of them are persisted.
+    expect(normalizeDeviceConfigs({ tv1: { alias: "TV", autoWake: true } })).toEqual({ tv1: { alias: "TV" } });
+    expect(normalizeDeviceConfigs({ tv1: { alias: "TV", autoWake: "false" } })).toEqual({ tv1: { alias: "TV" } });
+    expect(normalizeDeviceConfigs({ tv1: { alias: "TV", autoWake: 0 } })).toEqual({ tv1: { alias: "TV" } });
+  });
+  it("normalizeDeviceConfigs keeps an entry whose only setting is the autoWake opt-out", () => {
+    expect(normalizeDeviceConfigs({ tv1: { autoWake: false } })).toEqual({ tv1: { autoWake: false } });
+    // ...but an entry that normalizes to nothing is still pruned.
+    expect(normalizeDeviceConfigs({ tv1: { autoWake: true } })).toEqual({});
+  });
+  it("normalizeDeviceConfigs coerces keyDelay from number or string, clamped to 0–5", () => {
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: 2 } })).toEqual({ tv1: { keyDelay: 2 } });
+    // The renderer sends the form value as a string; decimals are allowed.
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: "2.5" } })).toEqual({ tv1: { keyDelay: 2.5 } });
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: 7 } })).toEqual({ tv1: { keyDelay: 5 } });
+    // 0/negative/junk mean "default pacing" and stay unpersisted — pruning the empty entry.
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: 0 } })).toEqual({});
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: -1 } })).toEqual({});
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: "abc" } })).toEqual({});
+    expect(normalizeDeviceConfigs({ tv1: { keyDelay: "" } })).toEqual({});
+  });
+  it("autoWakeEnabled defaults to enabled and only a strict false disables", () => {
+    expect(autoWakeEnabled(undefined)).toBe(true);
+    expect(autoWakeEnabled({})).toBe(true);
+    expect(autoWakeEnabled({ autoWake: false })).toBe(false);
+    expect(autoWakeEnabled({ autoWake: "false" as never })).toBe(true);
   });
 });
 

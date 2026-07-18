@@ -1,6 +1,6 @@
 // Preload: the only bridge between the privileged main process and the sandboxed renderer.
 // Exposes a tiny, explicit `window.tvAPI` (contextIsolation is on, nodeIntegration off) — the
-// log window can read history, subscribe to new lines, and fire the two TV actions, nothing more.
+// log window can read history, subscribe to new lines, and run user commands, nothing more.
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { LogEntry } from "../log.js";
@@ -28,15 +28,12 @@ const tvAPI = {
   // Fetch the backlog accumulated before the window opened.
   getHistory: (): Promise<LogEntry[]> => ipcRenderer.invoke("log:history"),
   clearHistory: (): void => ipcRenderer.send("log:clear"),
-  // Resolves with the action's outcome so the Power screen can show success/error. An optional
-  // deviceIds list scopes the action to those TVs (the Main-screen TV selector); omitted/empty
-  // means the TVs selected in Settings.
-  wakeTv: (deviceIds?: string[]): Promise<ActionResult> => ipcRenderer.invoke("action:on", deviceIds),
-  tvOffSleep: (deviceIds?: string[]): Promise<ActionResult> => ipcRenderer.invoke("action:off", deviceIds),
-  // TV off without sleeping this PC.
-  tvOff: (deviceIds?: string[]): Promise<ActionResult> => ipcRenderer.invoke("action:off-only", deviceIds),
   // Run a user-defined command (Settings → Commands) as currently shown in the UI.
   runCommand: (cmd: CommandConfig): Promise<ActionResult> => ipcRenderer.invoke("command:run", cmd),
+  // Send an explicit remote-key sequence to one LAN TV (Settings → the per-TV "Run key sequence"
+  // button). The keys are the user's raw tokens (comma-split); the main process normalizes them.
+  sendKeys: (deviceId: string, keys: string[]): Promise<ActionResult> =>
+    ipcRenderer.invoke("tv:send-keys", { deviceId, keys }),
   // Auth
   authStatus: (): Promise<AuthStatus> => ipcRenderer.invoke("auth:status"),
   login: (): Promise<AuthResult> => ipcRenderer.invoke("auth:login"),

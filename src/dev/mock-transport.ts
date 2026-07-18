@@ -7,6 +7,7 @@
 import { parseStatus, mainCapabilities } from "../domain/tv.js";
 import type { STDevice, TVStatus } from "../domain/tv.js";
 import type { TVTransport } from "../api/transport.js";
+import { log } from "../log.js";
 import { FakeTVState, isMockAuthorized } from "./mock-cloud.js";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -43,6 +44,16 @@ export class FakeTransport implements TVTransport {
   async setInputSource(deviceId: string, _capability: string, source: string): Promise<void> {
     await this.delay();
     this.tvState.setInput(deviceId, source);
+  }
+
+  async sendKeys(deviceId: string, keys: string[]): Promise<void> {
+    // No real remote here — log each key as it "goes out", mirroring LocalTV.sendKeys' one-at-a-time
+    // send (a per-key delay), so `npm run electron:dev:mock` shows the sequence step-by-step.
+    log(`Mock TV ${deviceId} received keys: ${keys.join(", ")}`);
+    for (let i = 0; i < keys.length; i++) {
+      await this.delay();
+      log(`  → key ${i + 1}/${keys.length}: ${keys[i]}`);
+    }
   }
 
   async listDevices(): Promise<STDevice[]> {

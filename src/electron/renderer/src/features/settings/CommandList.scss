@@ -1,5 +1,5 @@
 /* The Commands group: one card per command — a single controls row
-   (TVs | action | HDMI? | hotkey | ▶ | delete). */
+   (TV | action + HDMI? OR key sequence | hotkey | ▶ | delete). */
 .command-list {
   display: flex;
   flex-direction: column;
@@ -20,42 +20,32 @@
     gap: 8px;
  
     /* The hotkey capture field must be allowed to shrink/grow inside the row (the input's
-       min-content size would otherwise overflow and clip the clear button). */
+       min-content size would otherwise overflow and clip the clear button). The auto margin
+       splits the row: any slack goes before the hotkey, so it and the icon buttons after it
+       pack to the right edge while the TV/action controls stay left. */
     .hotkey {
       flex: 1;
       min-width: 0;
+      margin-left: auto;
     }
 
-    /* Free-text custom input name (shown when "Custom…" is picked). Kept compact so the row
-       layout matches the fixed HDMI dropdown it replaces. */
-    .command-hdmi-custom {
-      width: 120px;
+    /* The LAN key-sequence field is a bare <input> — it doesn't sit inside a Field, so give it the
+       classic input look (matching .field input in Field.scss, same as HotkeyField does) instead of
+       the raw browser default. Grows to take the slack in the row, like the hotkey field. */
+    .command-keyseq {
+      flex: 1;
       min-width: 0;
-    }
-  }
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
 
-  .command-tvs {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px 14px;
-    font-size: 12px;
-
-    .command-tvs-label {
-      color: var(--muted);
-    }
-
-    label {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      cursor: pointer;
-    }
-
-    /* Shown while no TV is checked — the command falls back to every enabled TV. */
-    .command-tvs-all {
-      color: var(--muted);
-      font-style: italic;
+      &:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
     }
   }
 

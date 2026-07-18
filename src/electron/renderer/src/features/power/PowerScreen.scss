@@ -11,28 +11,36 @@
   padding-bottom: 40px;
 }
 
-/* Reserved like .power-result so the selector appearing after its fetch (or not at all, with
-   fewer than two TVs) never shifts the buttons. */
-.power-tv-slot {
-  min-height: 26px;
+/* One tile per pinned command: a wrapping centered row so a long list breaks into rows instead
+   of pushing the window wide. */
+.power-grid {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
-}
-
-.power-buttons {
-  display: flex;
-  gap: 48px;
+  gap: 28px 36px;
+  max-width: 560px;
 }
 
 .power-action {
+  width: 128px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
+  text-align: center;
 
   .power-label {
     color: var(--muted);
     font-size: 13px;
+    overflow-wrap: anywhere; /* key-sequence labels can be long */
+  }
+
+  /* The command's target TV, under the label. */
+  .power-tv {
+    color: var(--muted);
+    opacity: 0.75;
+    font-size: 11px;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -47,6 +55,7 @@
   background: var(--panel);
   color: var(--muted);
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  margin-bottom: 4px;
 
   &.on:hover:not(:disabled) {
     color: var(--success);
@@ -58,6 +67,12 @@
     border-color: var(--error);
     background: var(--btn-bg);
   }
+  /* "input", not "switch" — the global ToggleSwitch .switch class would restyle the button. */
+  &.input:hover:not(:disabled) {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--btn-bg);
+  }
   &.pending {
     color: var(--accent);
     border-color: var(--accent);
@@ -67,38 +82,19 @@
   }
 }
 
-/* Pinned commands: a wrapping row of labeled pill buttons under the power buttons. Built on the
-   base <button> look (global.scss); constrained so a long list wraps instead of pushing the
-   window wide. */
-.power-commands {
+/* Nothing pinned yet: a muted hint plus a shortcut into Settings. */
+.power-empty {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  max-width: 420px;
-}
-
-.power-command {
-  display: inline-flex;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  border-radius: 999px;
-  padding: 6px 14px;
-  color: var(--muted);
+  gap: 16px;
+  max-width: 360px;
+  text-align: center;
 
-  svg { flex: 0 0 auto; }
-
-  &:hover:not(:disabled) {
-    color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  &.pending {
-    color: var(--accent);
-    border-color: var(--accent);
-    opacity: 1;
-
-    svg { animation: power-pulse 1.2s ease-in-out infinite; }
+  p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
   }
 }
 

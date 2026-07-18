@@ -6,10 +6,11 @@
 // refreshes rather than holding a stale client.
 
 import { loadConfig, resolveToken, type TVConfig } from "./config.js";
+import { autoWakeEnabled } from "./domain/config.js";
 import { hasOAuthClient, getAccessToken, authorizeUrl, exchangeCode, DEFAULT_REDIRECT_URI } from "./api/oauth.js";
 import { pickInput, isOnInput, isTV } from "./domain/tv.js";
 import { SmartThings } from "./api/smartthings.js";
-import { LocalTV } from "./api/local-tv.js";
+import { LocalTV, normalizeRemoteKey } from "./api/local-tv.js";
 import type { TVTransport } from "./api/transport.js";
 import { isMockMode } from "./dev/mock-cloud.js";
 import { makeMockTransport } from "./dev/mock-transport.js";
@@ -74,6 +75,10 @@ class RoutingTransport implements TVTransport {
     await (await this.transportFor(deviceId)).setInputSource(deviceId, capability, source);
   }
 
+  async sendKeys(deviceId: string, keys: string[]): Promise<void> {
+    await (await this.transportFor(deviceId)).sendKeys(deviceId, keys);
+  }
+
   async listDevices(): Promise<STDevice[]> {
     // Local is config-driven and always available; cloud is best-effort — a missing client (signed
     // out) or a cloud error must not hide the local TVs, so log and fall back to local-only.
@@ -108,6 +113,10 @@ export interface App {
   // Switch the input on TVs that are already on; an off TV is left off (the "switch HDMI"
   // command — unlike switch(), it never powers anything on).
   switchInputOnly(input: string, deviceIds?: string[]): Promise<boolean>;
+  // Send an explicit remote-key sequence to one TV (the Settings "Run key sequence" action). The
+  // raw tokens are normalized to KEY_* here. LAN-only in practice (the daemon guards the id);
+  // resolves false when the sequence is empty, true when the keys went out.
+  sendKeys(deviceId: string, rawKeys: string[]): Promise<boolean>;
   listDevices(): Promise<void>;
   // The TVs on the account (for the Settings selection UI).
   listTVs(): Promise<STDevice[]>;
@@ -351,6 +360,22 @@ export function createApp(): App {
   async function switchInput(inputOverride?: string, deviceIds?: string[], opts?: SwitchOptions): Promise<boolean> {
     const { config, transport } = await connect(inputOverride);
     const ids = deviceIds ?? resolveDeviceIds(config);
+    // An automatic trigger (resume/boot) honors each TV's autoWake opt-out; a user action never
+    // filters. All targets opted out is a success, not the "No TVs selected" error path — and it
+    // must not throw, or the daemon's wake retry loop would pointlessly re-run it.
+    let targetIds = ids;
+    if (opts?.auto) {
+      targetIds = ids.filter((id) => autoWakeEnabled(config.deviceConfigs?.[id]));
+      for (const id of ids) {
+        if (!targetIds.includes(id)) {
+          log(`[${config.deviceConfigs?.[id]?.alias || id}] Automatic power-on is off for this TV — leaving it alone.`);
+        }
+      }
+      if (targetIds.length === 0 && ids.length > 0) {
+        log("Automatic power-on is off for every selected TV — skipping.");
+        return true;
+      }
+    }
     return forEachSelected(
       config,
       transport,
@@ -359,10 +384,10 @@ export function createApp(): App {
           transport,
           deviceId,
           inputFor(config, deviceId, inputOverride),
-          deviceTag(config, deviceId, ids),
+          deviceTag(config, deviceId, targetIds),
           opts?.auto ?? false,
         ),
-      deviceIds,
+      targetIds,
     );
   }
 
@@ -389,6 +414,18 @@ export function createApp(): App {
         inputOnlyOne(transport, deviceId, inputFor(config, deviceId, input), deviceTag(config, deviceId, ids)),
       deviceIds,
     );
+  }
+
+  // Send an explicit remote-key sequence to one TV. Unlike the command actions this targets a
+  // single explicit device (no Settings-selection fan-out) and never powers on or reads status —
+  // it just fires the keys. Tokens are normalized to KEY_* ids here; an empty result no-ops.
+  async function sendKeys(deviceId: string, rawKeys: string[]): Promise<boolean> {
+    const keys = rawKeys.map(normalizeRemoteKey).filter(Boolean);
+    if (keys.length === 0) return false;
+    const { transport } = await connect();
+    log(`Sending keys to ${deviceId}: ${keys.join(", ")}`);
+    await transport.sendKeys(deviceId, keys);
+    return true;
   }
 
   // Turn one TV off, but only when it's currently on its PC input.
@@ -457,5 +494,5 @@ export function createApp(): App {
   }
 
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.
-  return { login, switch: switchInput, off, powerOn, switchInputOnly, listDevices, listTVs };
+  return { login, switch: switchInput, off, powerOn, switchInputOnly, sendKeys, listDevices, listTVs };
 }

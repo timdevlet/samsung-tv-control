@@ -1,0 +1,7 @@
+/* Numeric input, styled by the shared .field input rules (Field.scss). Chromium's spin buttons
+   are hidden so it reads like the app's text inputs. */
+.number-input::-webkit-outer-spin-button,
+.number-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

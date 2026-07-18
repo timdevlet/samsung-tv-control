@@ -91,6 +91,12 @@ export class SmartThings implements TVTransport {
     await this.command(deviceId, capability, "setInputSource", [source]);
   }
 
+  // The SmartThings cloud API exposes named capabilities (power, input source), not raw remote
+  // keys — there's no way to send an arbitrary KEY_* sequence. This capability is LAN-only.
+  async sendKeys(_deviceId: string, _keys: string[]): Promise<void> {
+    throw new Error("Sending a raw key sequence isn't supported for cloud (SmartThings) TVs.");
+  }
+
   private async command(
     deviceId: string,
     capability: string,

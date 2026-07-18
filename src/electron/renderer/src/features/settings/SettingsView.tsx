@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { AppSettings, AuthStatus, MainButtonKey, STDevice } from "../../types";
+import type { AppSettings, AuthStatus } from "../../types";
 import { Button } from "../../components/Button";
 import { DangerZone } from "../../components/DangerZone";
 import { Disclosure } from "../../components/Disclosure";
 import { ErrorText } from "../../components/ErrorText";
 import { Field } from "../../components/Field";
+import { NumberInput } from "../../components/NumberInput";
 import { ScrollArea } from "../../components/ScrollArea";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { SettingsGroup } from "../../components/SettingsGroup";
@@ -15,9 +16,8 @@ import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { ToastKind } from "../../lib/toasts";
 import { CommandList } from "./CommandList";
-import { DeviceMultiSelect } from "./DeviceMultiSelect";
-import { deviceMultiSelectOptions } from "./deviceOptions";
 import { OAuthClientFields } from "./OAuthClientFields";
+import { TvControlList } from "./TvControlList";
 import "./SettingsView.scss";
 
 const THEME_OPTIONS = [
@@ -25,14 +25,6 @@ const THEME_OPTIONS = [
   { value: "dark", label: "Dark" },
   { value: "system", label: "System" },
 ] as const;
-
-// The Main-screen power buttons, each toggleable under Behavior. Keys mirror the PowerAction the
-// Main screen dispatches (and the MainButtons record); labels match the buttons' captions there.
-const MAIN_BUTTON_OPTIONS: readonly { key: MainButtonKey; label: string }[] = [
-  { key: "on", label: "Show “Power ON” button" },
-  { key: "off", label: "Show “TV OFF” button" },
-  { key: "offSleep", label: "Show “TV OFF + Sleep PC” button" },
-];
 
 // The LAN host/MAC inputs plus the Discover/Pair action row, shared by the "Add a TV" tab and an
 // existing (non-cloud) TV's tab — identical fields, different id prefix and pair-status display.
@@ -93,7 +85,7 @@ function LanPairFields({
   );
 }
 
-// The "Add a TV" tab edits a scratch deviceConfigs entry under this key; it must never be
+// The "Add a TV" flow edits a scratch deviceConfigs entry under this key; it must never be
 // persisted as a real device (pairing creates the real local:<mac> entry instead).
 const ADD_TAB = "__add__";
 function stripAddScratch<T>(configs: Record<string, T>): Record<string, T> {
@@ -156,8 +148,6 @@ export function SettingsView({
       // scratch entry (the Add-a-TV tab) is never a real device — strip it.
       deviceConfigs: stripAddScratch(draft.deviceConfigs),
       theme: draft.theme,
-      // Which built-in power buttons the Main screen shows.
-      mainButtons: draft.mainButtons,
       // Whole-list replace, like deviceConfigs — an empty list means "all commands deleted".
       commands: draft.commands,
     });
@@ -167,96 +157,75 @@ export function SettingsView({
     return null;
   });
 
-  // Which TV the "TV control" group edits: "all" = the shared input + global hotkeys (acting on
-  // the selected TVs), a deviceId = that TV's own settings. Not persisted — every open starts on
-  // "All TVs". Tab labels track the alias draft live, so renaming a TV renames its tab.
-  const [tvTab, setTvTab] = useState("all");
-  // Tab labels track the alias draft live, so renaming a TV renames its tab; the live list
-  // supplies the fallback label. The "__add__" scratch entry (the Add-a-TV tab) is not a real
-  // device and never gets a tab here.
+  // The TV control group is a single-select list. `selectedTvId` is the TV whose settings show
+  // (and, via selectOnlyDevice, the one "All TVs" commands act on); null = nothing selected yet.
+  // `addingTv` opens the "+ Add a TV" pairing form in place of a TV's panel. Neither is persisted
+  // directly — selection is mirrored into selectedDeviceIds on click.
+  const [selectedTvId, setSelectedTvId] = useState<string | null>(null);
+  const [addingTv, setAddingTv] = useState(false);
+  // Labels track the alias draft live (renaming a TV renames its row); the live list supplies the
+  // fallback label.
   const listedLabels =
     devices.kind === "ready"
       ? new Map(devices.devices.map((d) => [d.deviceId, d.label]))
       : new Map<string, string>();
   // Cloud (SmartThings) TVs — the ones the live list tags source "cloud". They get a "Cloud" badge
-  // on their tab and skip the LAN pair/host fields (they aren't reached over the LAN).
+  // and skip the LAN pair/host/key-sequence fields (they aren't reached over the LAN).
   const cloudIds =
     devices.kind === "ready"
       ? new Set(devices.devices.filter((d) => d.source === "cloud").map((d) => d.deviceId))
       : new Set<string>();
-  // Per-TV tabs come from the union of two sources: every TV the live list reports (cloud /
-  // SmartThings devices, which carry no host in deviceConfigs) and every LAN-paired config
-  // entry (keyed by `local:<mac>`, present even when the TV is temporarily unreachable). Using
-  // only the host-bearing configs would drop cloud-listed TVs — they'd show in "TVs to control"
-  // yet have no tab. Deduped by id, live-list order first.
-  const tabIds: string[] = [];
-  const seenTabIds = new Set<string>();
-  const addTabId = (id: string) => {
-    if (id === ADD_TAB || seenTabIds.has(id)) return;
-    seenTabIds.add(id);
-    tabIds.push(id);
+  // Every known TV: the union of every TV the live list reports (cloud / SmartThings devices, which
+  // carry no host in deviceConfigs) and every LAN-paired config entry (keyed `local:<mac>`, present
+  // even when the TV is temporarily unreachable). Deduped, live-list order first. Feeds both the TV
+  // control list and the Commands target picker.
+  const knownTvIds: string[] = [];
+  const seenTvIds = new Set<string>();
+  const addTvId = (id: string) => {
+    if (id === ADD_TAB || seenTvIds.has(id)) return;
+    seenTvIds.add(id);
+    knownTvIds.push(id);
   };
-  if (devices.kind === "ready") devices.devices.forEach((d) => addTabId(d.deviceId));
+  if (devices.kind === "ready") devices.devices.forEach((d) => addTvId(d.deviceId));
   Object.entries(form.draft.deviceConfigs).forEach(([id, cfg]) => {
-    if (cfg.host?.trim()) addTabId(id);
+    if (cfg.host?.trim()) addTvId(id);
   });
-  const deviceTabs = tabIds.map((id) => {
-    const cfg = form.draft.deviceConfigs[id];
-    const text = cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id;
-    return {
-      value: id,
-      label: cloudIds.has(id) ? (
-        <span className="tab-label">
-          {text}
-          <span className="source-badge">C</span>
-        </span>
-      ) : (
-        text
-      ),
-    };
-  });
-  // Command-target checkboxes: every known TV, rendered with the SAME rich option builder as the
-  // "TVs to control" selector (alias/title + "Cloud" badge + muted note · label/model · id
-  // subtitle) so the two pickers look identical. The union covers cloud-listed and LAN-paired
-  // TVs alike; live label/name/source come from the list when present, else the LAN host stands in
-  // as the label. A command with no TV checked targets all enabled TVs.
-  const listedById =
-    devices.kind === "ready"
-      ? new Map(devices.devices.map((d) => [d.deviceId, d]))
-      : new Map<string, STDevice>();
-  const tvOptions = deviceMultiSelectOptions(
-    tabIds.map((id) => {
-      const listed = listedById.get(id);
-      const host = form.draft.deviceConfigs[id]?.host?.trim() ?? "";
-      return {
-        deviceId: id,
-        label: listed?.label ?? host,
-        name: listed?.name ?? "",
-        source: listed?.source ?? (host ? ("local" as const) : undefined),
-      };
-    }),
-    form.draft.deviceConfigs,
-  );
-  // Plain-text name for a command target, used in the Run toast (the rich option label is JSX).
+  // Plain-text name for a TV id (alias → live label → host → id).
   const tvLabel = (id: string) => {
     const cfg = form.draft.deviceConfigs[id];
     return cfg?.alias?.trim() || listedLabels.get(id) || cfg?.host || id;
   };
-  // Per-TV tabs exist only once at least one TV has been paired; until then the bar is just
-  // "All TVs" plus the always-present "Add a TV" tab so a first TV can be paired.
-  const hasDeviceTabs = deviceTabs.length > 0;
-  const tvTabOptions = [
-    { value: "all", label: "All TVs" },
-    ...deviceTabs,
-    { value: ADD_TAB, label: "+ Add a TV" },
-  ];
-  // A device can disappear between list loads — never leave the UI stranded on a gone tab.
-  const activeTvTab = tvTabOptions.some((o) => o.value === tvTab) ? tvTab : "all";
-  const activeDeviceConfig =
-    activeTvTab === "all" ? undefined : form.draft.deviceConfigs[activeTvTab];
-  // A cloud TV's per-TV tab hides the LAN pair/host/MAC fields — it isn't reached over the LAN.
-  const activeIsCloud = cloudIds.has(activeTvTab);
-  // Pairing/discovery status for the active per-TV tab.
+  // The command target choices: every known TV with a plain label and a LAN/cloud tag. A LAN target
+  // makes a command run a key sequence; a cloud one runs an action. LAN vs cloud is the deviceId
+  // namespace (`local:<mac>` = LAN), the same rule the transport routes by — not the live-list
+  // "cloud" badge, so a temporarily-unlisted cloud TV isn't mistaken for LAN.
+  const tvChoices = knownTvIds.map((id) => ({
+    deviceId: id,
+    label: tvLabel(id),
+    isLocal: id.startsWith("local:"),
+  }));
+  // Seed the selection lazily from what's on disk: on first ready with nothing chosen yet, select
+  // the stored TV (the first of selectedDeviceIds — a legacy multi-select on disk keeps its other
+  // entries until the user clicks a row, which collapses the set to one via selectOnlyDevice). We
+  // DON'T rewrite storage here — merely opening Settings shouldn't silently change what commands
+  // act on. A device that vanished between list loads is skipped so we never strand on a gone id.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || addingTv || selectedTvId !== null) return;
+    if (devices.kind !== "ready") return;
+    seededRef.current = true;
+    const first = [...form.draft.selectedDeviceIds].find((id) => knownTvIds.includes(id));
+    if (first) setSelectedTvId(first);
+    // knownTvIds/draft are recomputed each render; the ref guard makes this run once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devices.kind]);
+  // A device can disappear between list loads — never leave the panel stranded on a gone TV.
+  const activeTvId =
+    selectedTvId && knownTvIds.includes(selectedTvId) ? selectedTvId : null;
+  const activeDeviceConfig = activeTvId ? form.draft.deviceConfigs[activeTvId] : undefined;
+  // A cloud TV's panel hides the LAN pair/host/MAC/key-sequence fields — it isn't reached over LAN.
+  const activeIsCloud = activeTvId ? cloudIds.has(activeTvId) : false;
+  // Pairing/discovery status for the active LAN context (the selected TV, or the Add form).
   const [pairing, setPairing] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   // Whether the active TV currently has a stored pairing token. Seeded from settings and flipped
@@ -276,9 +245,14 @@ export function SettingsView({
     void window.tvAPI.getAppVersion().then(setAppVersion);
   }, []);
 
-  // Discover TVs on the LAN and auto-fill the active tab's host/mac from the
-  // first match. (A picker would be nicer for multiple TVs; first-match keeps the flow simple.)
+  // The deviceConfigs key the LAN fields currently edit: the selected TV, or the "__add__" scratch
+  // entry when the Add form is open.
+  const lanTargetId = addingTv ? ADD_TAB : activeTvId;
+
+  // Discover TVs on the LAN and auto-fill the active LAN panel's host/mac from the first match.
+  // (A picker would be nicer for multiple TVs; first-match keeps the flow simple.)
   const onDiscover = async () => {
+    if (!lanTargetId) return;
     setDiscovering(true);
     try {
       const res = await window.tvAPI.discoverTVs();
@@ -292,22 +266,22 @@ export function SettingsView({
         return;
       }
       form.setError(null);
-      form.setDeviceConfig(activeTvTab, "host", first.host);
-      if (first.mac) form.setDeviceConfig(activeTvTab, "mac", first.mac);
+      form.setDeviceConfig(lanTargetId, "host", first.host);
+      if (first.mac) form.setDeviceConfig(lanTargetId, "mac", first.mac);
     } finally {
       setDiscovering(false);
     }
   };
 
-  // Local transport: pair with the TV whose fields live on `tabId` — an existing TV's tab, or the
-  // "Add a TV" scratch tab (which passes no deviceId, so the main process mints a fresh
+  // Local transport: pair with the TV whose fields live on `targetId` — an existing TV's row, or
+  // the "Add a TV" scratch entry (which passes no deviceId, so the main process mints a fresh
   // local:<mac> entry, pops the on-screen Allow, and stores the token + host/mac).
-  const onPair = async (tabId: string) => {
-    const isAdd = tabId === ADD_TAB;
-    // For an existing tab, flush the draft first so the just-typed host/mac are on disk before
+  const onPair = async (targetId: string) => {
+    const isAdd = targetId === ADD_TAB;
+    // For an existing TV, flush the draft first so the just-typed host/mac are on disk before
     // the pairing IPC rewrites that entry.
     if (!isAdd) await form.flush();
-    const cfg = form.draft.deviceConfigs[tabId];
+    const cfg = form.draft.deviceConfigs[targetId];
     const host = cfg?.host?.trim();
     const mac = cfg?.mac?.trim() ?? "";
     if (!host) {
@@ -318,34 +292,37 @@ export function SettingsView({
     }
     setPairing(true);
     try {
-      const res = await window.tvAPI.pairTV(isAdd ? { host, mac } : { deviceId: tabId, host, mac });
+      const res = await window.tvAPI.pairTV(isAdd ? { host, mac } : { deviceId: targetId, host, mac });
       if (!res.ok) {
         form.setError(res.error || "Pairing failed.");
         return;
       }
       form.setError(null);
       if (isAdd) {
-        // Seed the draft with the entry the pairing IPC just wrote and mirror its auto-select.
+        // Seed the draft with the entry the pairing IPC just wrote and make it the selected TV.
         // The autosave persists deviceConfigs as a whole-map replace built from the draft — if
         // the draft never learns about the fresh entry, the very next save (triggered right
         // below by clearing the scratch fields) would wipe the TV that was just paired.
         form.setDeviceConfig(res.deviceId, "host", host);
         if (mac) form.setDeviceConfig(res.deviceId, "mac", mac);
-        form.toggleDevice(res.deviceId, true);
+        // Single-select: the freshly paired TV becomes THE selected/controlled one.
+        form.selectOnlyDevice(res.deviceId);
         // Clear the scratch entry so it prunes on the next save and the fields reset for next
-        // time, then jump to the new TV's own tab.
+        // time, then jump to the new TV's own row.
         form.setDeviceConfig(ADD_TAB, "host", "");
         form.setDeviceConfig(ADD_TAB, "mac", "");
-        setTvTab(res.deviceId);
+        setAddingTv(false);
+        setSelectedTvId(res.deviceId);
       }
-      setPairedTabs((p) => ({ ...p, [isAdd ? res.deviceId : tabId]: true }));
+      setPairedTabs((p) => ({ ...p, [isAdd ? res.deviceId : targetId]: true }));
       reloadDevices();
     } finally {
       setPairing(false);
     }
   };
 
-  const activePaired = pairedTabs[activeTvTab] ?? activeDeviceConfig?.paired ?? false;
+  const activePaired =
+    (activeTvId ? pairedTabs[activeTvId] : undefined) ?? activeDeviceConfig?.paired ?? false;
 
   // Cloud sign-in (Experimental). With no OAuth client configured, Sign in expands the client
   // fields instead of opening the SmartThings popup; once a client exists it runs the OAuth flow
@@ -389,126 +366,139 @@ export function SettingsView({
             direct children of .modal, so the groups need their own wrapper. */}
         <div className="modal-inner">
           <SettingsGroup title="TV control">
-            <div className="tv-tabs">
-              <SegmentedControl
-                ariaLabel="Settings for"
-                value={activeTvTab}
-                options={tvTabOptions}
-                onChange={setTvTab}
+            <p className="hint">
+              Pick the TV to control — it's the one “All TVs” commands act on. Select it to rename
+              it, manage its connection, or run a key sequence.
+            </p>
+            {/* Two columns: the single-select TV list on the left (replaces the old tab bar);
+                selecting a row makes that TV the one controlled (selectedDeviceIds, collapsed to
+                it) and shows its parameters in the panel on the right. */}
+            <div className="tv-control-columns">
+              <TvControlList
+                devices={devices}
+                deviceConfigs={form.draft.deviceConfigs}
+                selectedId={activeTvId}
+                adding={addingTv}
+                onSelect={(id) => {
+                  setSelectedTvId(id);
+                  setAddingTv(false);
+                  form.selectOnlyDevice(id);
+                }}
+                onAddClick={() => {
+                  setAddingTv(true);
+                  setSelectedTvId(null);
+                }}
               />
-            </div>
-            {activeTvTab === "all" ? (
-              <>
-                <p className="hint">
-                  {hasDeviceTabs
-                    ? 'The checked TVs below are what "All TVs" commands and the Main-screen buttons act on. Pick a TV’s tab to rename it or manage its connection.'
-                    : "Add a TV to get started — open the “+ Add a TV” tab, then it’ll appear here to control."}
-                </p>
-                {/* The bulk subset picker: check any set of TVs at once (with "(Select all)"). It
-                    drives selectedDeviceIds, the set "All TVs" commands and the Main-screen buttons
-                    act on. */}
-                {hasDeviceTabs && (
-                  <Field label="TVs to control">
-                    <DeviceMultiSelect
-                      state={devices}
-                      selectedIds={form.draft.selectedDeviceIds}
-                      deviceConfigs={form.draft.deviceConfigs}
-                      onToggle={form.toggleDevice}
-                    />
-                  </Field>
-                )}
-              </>
-            ) : activeTvTab === ADD_TAB ? (
-              <>
-                <p className="hint">
-                  Add a TV on your network. Turn the TV on, Discover it (or enter its address),
-                  then Pair and accept the on-screen prompt. It'll then get its own tab above.
-                </p>
-                <LanPairFields
-                  idPrefix="add"
-                  host={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
-                  mac={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
-                  onHost={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
-                  onMac={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
-                  discovering={discovering}
-                  pairing={pairing}
-                  onDiscover={() => void onDiscover()}
-                  onPair={() => void onPair(ADD_TAB)}
-                  paired={null}
-                />
-              </>
-            ) : (
-              <>
-                <p className="hint">
-                  These apply only to this TV. To act on it, add a command below with this TV as
-                  its target.
-                </p>
-                <SwitchField
-                  id="tvSelected"
-                  label="Control this TV (included in All-TVs actions)"
-                  checked={form.draft.selectedDeviceIds.has(activeTvTab)}
-                  onChange={(v) => form.toggleDevice(activeTvTab, v)}
-                />
-                <Field label="Name" htmlFor="tvAlias">
-                  <TextInput
-                    id="tvAlias"
-                    placeholder={
-                      devices.kind === "ready"
-                        ? devices.devices.find((d) => d.deviceId === activeTvTab)?.label
-                        : undefined
-                    }
-                    value={activeDeviceConfig?.alias ?? ""}
-                    onValueChange={(v) => form.setDeviceConfig(activeTvTab, "alias", v)}
-                  />
-                </Field>
-                <Field label="Description" htmlFor="tvDescription">
-                  <TextInput
-                    id="tvDescription"
-                    placeholder="e.g. living room tv"
-                    value={activeDeviceConfig?.description ?? ""}
-                    onValueChange={(v) => form.setDeviceConfig(activeTvTab, "description", v)}
-                  />
-                </Field>
-                {/* LAN pairing — hidden for cloud TVs, which are reached through SmartThings, not
-                    the local network. */}
-                {activeIsCloud ? (
-                  <p className="hint">
-                    This TV is controlled through your SmartThings account (Cloud). Manage it in the
-                    SmartThings app; sign out under Experimental to remove the cloud TVs.
-                  </p>
-                ) : (
+              <div className="tv-control-panel">
+                {addingTv ? (
                   <>
                     <p className="hint">
-                      Discover this TV on the network or enter its address, then Pair (turn the TV
-                      on and accept the on-screen prompt).
+                      Add a TV on your network. Turn the TV on, Discover it (or enter its address),
+                      then Pair and accept the on-screen prompt. It'll then appear in the list.
                     </p>
                     <LanPairFields
-                      idPrefix="tv"
-                      host={activeDeviceConfig?.host ?? ""}
-                      mac={activeDeviceConfig?.mac ?? ""}
-                      onHost={(v) => form.setDeviceConfig(activeTvTab, "host", v)}
-                      onMac={(v) => form.setDeviceConfig(activeTvTab, "mac", v)}
+                      idPrefix="add"
+                      host={form.draft.deviceConfigs[ADD_TAB]?.host ?? ""}
+                      mac={form.draft.deviceConfigs[ADD_TAB]?.mac ?? ""}
+                      onHost={(v) => form.setDeviceConfig(ADD_TAB, "host", v)}
+                      onMac={(v) => form.setDeviceConfig(ADD_TAB, "mac", v)}
                       discovering={discovering}
                       pairing={pairing}
                       onDiscover={() => void onDiscover()}
-                      onPair={() => void onPair(activeTvTab)}
-                      paired={activePaired}
+                      onPair={() => void onPair(ADD_TAB)}
+                      paired={null}
                     />
                   </>
+                ) : activeTvId ? (
+                  <>
+                    <Field label="Name" htmlFor="tvAlias">
+                      <TextInput
+                        id="tvAlias"
+                        placeholder={
+                          devices.kind === "ready"
+                            ? devices.devices.find((d) => d.deviceId === activeTvId)?.label
+                            : undefined
+                        }
+                        value={activeDeviceConfig?.alias ?? ""}
+                        onValueChange={(v) => form.setDeviceConfig(activeTvId, "alias", v)}
+                      />
+                    </Field>
+                    <Field label="Description" htmlFor="tvDescription">
+                      <TextInput
+                        id="tvDescription"
+                        placeholder="e.g. living room tv"
+                        value={activeDeviceConfig?.description ?? ""}
+                        onValueChange={(v) => form.setDeviceConfig(activeTvId, "description", v)}
+                      />
+                    </Field>
+                    <SwitchField
+                      id="tvAutoWake"
+                      label="Turn on automatically when this PC wakes up"
+                      checked={activeDeviceConfig?.autoWake ?? true}
+                      onChange={(v) => form.setDeviceConfig(activeTvId, "autoWake", v)}
+                    />
+                    {/* LAN pairing + key sequence — hidden for cloud TVs, which are reached through
+                        SmartThings, not the local network. */}
+                    {activeIsCloud ? (
+                      <p className="hint">
+                        This TV is controlled through your SmartThings account (Cloud). Manage it in
+                        the SmartThings app; sign out under Experimental to remove the cloud TVs.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="hint">
+                          Discover this TV on the network or enter its address, then Pair (turn the
+                          TV on and accept the on-screen prompt).
+                        </p>
+                        <LanPairFields
+                          idPrefix="tv"
+                          host={activeDeviceConfig?.host ?? ""}
+                          mac={activeDeviceConfig?.mac ?? ""}
+                          onHost={(v) => form.setDeviceConfig(activeTvId, "host", v)}
+                          onMac={(v) => form.setDeviceConfig(activeTvId, "mac", v)}
+                          discovering={discovering}
+                          pairing={pairing}
+                          onDiscover={() => void onDiscover()}
+                          onPair={() => void onPair(activeTvId)}
+                          paired={activePaired}
+                        />
+                        <Field label="Delay between keys (seconds, 0–5)" htmlFor="tvKeyDelay">
+                          <NumberInput
+                            id="tvKeyDelay"
+                            min={0}
+                            max={5}
+                            placeholder="0"
+                            value={activeDeviceConfig?.keyDelay ?? ""}
+                            onValueChange={(v) => form.setDeviceConfig(activeTvId, "keyDelay", v)}
+                          />
+                        </Field>
+                        <p className="hint">
+                          Extra pause between the keys of every sequence sent to this TV — for TVs
+                          whose menus need time between presses. Empty or 0 = default pacing.
+                        </p>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <p className="hint">
+                    {devices.kind === "ready" && knownTvIds.length === 0
+                      ? "Add a TV to get started — use “+ Add a TV”."
+                      : "Select a TV to configure it."}
+                  </p>
                 )}
-              </>
-            )}
+              </div>
+            </div>
           </SettingsGroup>
           <SettingsGroup title="Commands">
             <p className="hint">
-              Your own commands: pick an action (and an HDMI input for the switch actions), check
-              the TVs it targets (none checked = all enabled TVs), optionally bind a hotkey, then
-              run it with ▶. Toggle the eye to add it as a button on the Main screen.
+              Your own commands: pick the TV it targets (or “All TVs”). A cloud TV runs an action
+              (and an HDMI input for the switch actions); a LAN TV runs a key sequence you type
+              instead. Optionally bind a hotkey, then run it with ▶. Toggle the eye to add it as a
+              button on the Main screen.
             </p>
             <CommandList
               commands={form.draft.commands}
-              tvOptions={tvOptions}
-              tvLabel={tvLabel}
+              tvChoices={tvChoices}
               onAdd={form.addCommand}
               onRemove={form.removeCommand}
               onChange={form.setCommand}
@@ -531,16 +521,6 @@ export function SettingsView({
               checked={form.draft.minimizeToTrayOnClose}
               onChange={(v) => form.set("minimizeToTrayOnClose", v)}
             />
-            <p className="hint">Choose which power buttons appear on the Main screen.</p>
-            {MAIN_BUTTON_OPTIONS.map(({ key, label }) => (
-              <SwitchField
-                key={key}
-                id={`mainButton-${key}`}
-                label={label}
-                checked={form.draft.mainButtons[key]}
-                onChange={(v) => form.setMainButton(key, v)}
-              />
-            ))}
           </SettingsGroup>
           <SettingsGroup title="Experimental">
             <p className="hint">

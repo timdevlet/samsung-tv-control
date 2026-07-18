@@ -134,6 +134,50 @@ export function PowerOffIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+// HDMI plug outline (connector body with pin dots), for the switch-HDMI action.
+export function HdmiIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M3 9h18v4.5a1.5 1.5 0 0 1-1.5 1.5H17l-1.5 2.5h-7L7 15H4.5A1.5 1.5 0 0 1 3 13.5V9Z"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M7.5 12h.01M11 12h.01M14.5 12h.01M18 12h.01"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+// Remote control outline (body with button dots), for LAN key-sequence commands.
+export function KeysIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect
+        x="8"
+        y="3"
+        width="8"
+        height="18"
+        rx="2.5"
+        stroke="currentColor"
+        strokeWidth="2"
+      />
+      <path
+        d="M12 7h.01M12 11h.01M12 15h.01"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 // Downward chevron, for a dropdown trigger (the MultiSelect). Takes a className so the caller can
 // rotate it when the panel is open.
 export function ChevronDownIcon({ size = 16, className }: { size?: number; className?: string }) {

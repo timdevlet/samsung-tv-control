@@ -156,6 +156,49 @@ describe("routing transport", () => {
     expect(wsFakes.instances[0].closed).toBe(true);
   });
 
+  it("sendKeys routes a normalized sequence to a local:<id> TV over the LAN, never the cloud", async () => {
+    store = {
+      pcInput: "HDMI2",
+      deviceConfigs: { "local:tv": { host: "1.2.3.4", mac: "a0:b1:c2:d3:e4:f5", wsToken: "tok" } },
+    };
+    const fetchSpy = vi.fn(async () => new Response("", { status: 500 }));
+    vi.stubGlobal("fetch", fetchSpy);
+    // Raw tokens (as the IPC layer forwards them) are normalized to KEY_* by app.sendKeys and sent
+    // in order over one LAN WebSocket.
+    await expect(createApp().sendKeys("local:tv", ["HDMI", "UP", "LEFT"])).resolves.toBe(true);
+    expect(wsFakes.instances).toHaveLength(1);
+    expect(sentKeys(wsFakes.instances[0])).toEqual(["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
+    expect(wsFakes.instances[0].closed).toBe(true);
+    const calledCloud = fetchSpy.mock.calls.some(([url]) =>
+      String(url).startsWith("https://api.smartthings.com"),
+    );
+    expect(calledCloud).toBe(false);
+  });
+
+  it("sendKeys no-ops (false, no WS) when the sequence is empty or all blank", async () => {
+    store = { pcInput: "HDMI2", deviceConfigs: { "local:tv": { host: "1.2.3.4", wsToken: "tok" } } };
+    await expect(createApp().sendKeys("local:tv", ["  ", ""])).resolves.toBe(false);
+    expect(wsFakes.instances).toHaveLength(0);
+  });
+
+  it("sendKeys to a cloud (SmartThings UUID) id rejects — no raw-key channel over the cloud", async () => {
+    // A signed-in cloud client so the id routes to SmartThings (which throws for sendKeys) rather
+    // than failing on token resolution.
+    store = {
+      pcInput: "HDMI2",
+      clientId: "cid",
+      clientSecret: "secret",
+      refreshToken: "rt",
+      accessToken: "at",
+      accessTokenExpiresAt: Date.now() + 3_600_000,
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 200 })));
+    await expect(
+      createApp().sendKeys("11111111-2222-3333-4444-555555555555", ["KEY_UP"]),
+    ).rejects.toThrow(/cloud|SmartThings|isn't supported/i);
+    expect(wsFakes.instances).toHaveLength(0);
+  });
+
   it("a manual switch reaches EVERY selected TV, not just one", async () => {
     // Two LAN TVs, both already on. Each must get its own remote connection and its own keys —
     // TV b's recorded key sequence, TV a's direct-HDMI key (from pcInput "HDMI2").

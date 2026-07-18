@@ -2,7 +2,12 @@ import { describe, it, expect } from "vitest";
 
 // The user-defined command list: normalization of untrusted payloads and the log/UI labels.
 
-import { commandLabel, commandUsesHdmi, normalizeCommands } from "../src/domain/config.js";
+import {
+  commandIsKeySeq,
+  commandLabel,
+  commandUsesHdmi,
+  normalizeCommands,
+} from "../src/domain/config.js";
 
 describe("normalizeCommands", () => {
   it("returns [] for non-arrays", () => {
@@ -81,6 +86,29 @@ describe("normalizeCommands", () => {
     ).toEqual([{ id: "a", action: "tvOff" }]);
   });
 
+  it("keeps keySeq (and drops hdmi) for a LAN-targeted command", () => {
+    // A single local:<mac> target makes the command a key-sequence command — keySeq is kept, and
+    // the HDMI field is irrelevant (the action isn't used over the LAN) so it's dropped.
+    expect(
+      normalizeCommands([
+        { id: "a", action: "switchHdmi", deviceIds: ["local:tv"], hdmi: "HDMI2", keySeq: " HDMI, UP, LEFT " },
+      ]),
+    ).toEqual([{ id: "a", action: "switchHdmi", deviceIds: ["local:tv"], keySeq: "HDMI, UP, LEFT" }]);
+  });
+
+  it("sheds keySeq for a cloud / all-TVs command (keySeq only applies to a LAN target)", () => {
+    // Cloud target → runs an action; a stray keySeq is dropped and hdmi kept as usual.
+    expect(
+      normalizeCommands([
+        { id: "a", action: "switchHdmi", deviceIds: ["cloud-uuid"], hdmi: "HDMI2", keySeq: "UP" },
+      ]),
+    ).toEqual([{ id: "a", action: "switchHdmi", deviceIds: ["cloud-uuid"], hdmi: "HDMI2" }]);
+    // No target (all enabled TVs) → also not a key-seq command.
+    expect(normalizeCommands([{ id: "b", action: "tvOn", keySeq: "UP" }])).toEqual([
+      { id: "b", action: "tvOn" },
+    ]);
+  });
+
   it("fills a missing id with a positional fallback", () => {
     expect(normalizeCommands([{ action: "tvOn" }, { action: "tvOff", id: "  " }])).toEqual([
       { id: "cmd-1", action: "tvOn" },
@@ -117,6 +145,15 @@ describe("commandUsesHdmi", () => {
   });
 });
 
+describe("commandIsKeySeq", () => {
+  it("is true only when the single target is a LAN (local:) id", () => {
+    expect(commandIsKeySeq({ id: "a", action: "tvOn", deviceIds: ["local:tv"] })).toBe(true);
+    expect(commandIsKeySeq({ id: "a", action: "tvOn", deviceIds: ["cloud-uuid"] })).toBe(false);
+    // No target = all enabled TVs = a cloud-style action command.
+    expect(commandIsKeySeq({ id: "a", action: "tvOn" })).toBe(false);
+  });
+});
+
 describe("commandLabel", () => {
   it("names each action, including the chosen HDMI input", () => {
     expect(commandLabel({ id: "a", action: "tvOn" })).toBe("TV on");
@@ -124,5 +161,13 @@ describe("commandLabel", () => {
     expect(commandLabel({ id: "a", action: "tvOffSleepPc" })).toBe("TV off + sleep PC");
     expect(commandLabel({ id: "a", action: "tvOnHdmi", hdmi: "HDMI3" })).toBe("TV on → HDMI3");
     expect(commandLabel({ id: "a", action: "switchHdmi", hdmi: "HDMI5" })).toBe("Switch to HDMI5");
+  });
+
+  it("labels a LAN key-sequence command by its sequence, not the action", () => {
+    expect(
+      commandLabel({ id: "a", action: "tvOn", deviceIds: ["local:tv"], keySeq: "HDMI, UP" }),
+    ).toBe("Keys: HDMI, UP");
+    // A LAN target with no sequence yet still reads as a key-sequence command.
+    expect(commandLabel({ id: "a", action: "tvOn", deviceIds: ["local:tv"] })).toBe("Key sequence");
   });
 });

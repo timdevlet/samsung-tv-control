@@ -3,8 +3,7 @@ import type { CommandAction, CommandSettings } from "../../types";
 import { Button } from "../../components/Button";
 import { HotkeyField } from "../../components/HotkeyField";
 import { IconButton } from "../../components/IconButton";
-import { MultiSelect, type MultiSelectOption } from "../../components/MultiSelect";
-import { SelectMenu } from "../../components/SelectMenu";
+import { SelectMenu, type SelectMenuOption } from "../../components/SelectMenu";
 import { TextInput } from "../../components/TextInput";
 import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
 import type { ToastKind } from "../../lib/toasts";
@@ -20,33 +19,36 @@ const ACTION_OPTIONS: readonly { value: CommandAction; label: string }[] = [
 
 const HDMI_INPUTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const;
 
-// Sentinel value the HDMI dropdown uses for the "Custom…" row — not a real input id, so it can't
-// collide with a typed alias. When selected, a text field appears for a free-text input name.
-const CUSTOM_HDMI = "__custom__";
+const HDMI_OPTIONS = HDMI_INPUTS.map((v, i) => ({ value: v, label: `HDMI ${i + 1}` }));
 
-const HDMI_OPTIONS = [
-  ...HDMI_INPUTS.map((v, i) => ({ value: v, label: `HDMI ${i + 1}` })),
-  { value: CUSTOM_HDMI, label: "Custom…" },
-];
-
-// An hdmi value that isn't one of the fixed HDMI inputs is a custom alias (e.g. "pc"), so the row
-// shows the "Custom…" option plus a text field. Empty is the unset default, not custom.
-const isCustomHdmi = (hdmi: string) => hdmi !== "" && !(HDMI_INPUTS as readonly string[]).includes(hdmi);
+// The "All TVs" target sentinel — a command with no TV picked runs against every enabled TV. Can't
+// collide with a real device id (SmartThings UUIDs / "local:<mac>").
+const ALL_TVS = "__all__";
 
 // Mirrors commandUsesHdmi in src/domain/config.ts — duplicated so the sandboxed renderer keeps
 // importing only types from the node-side modules.
 const usesHdmi = (action: CommandAction) => action === "tvOnHdmi" || action === "switchHdmi";
 
-// The user-defined command list (Settings → Commands): one card per command — a single controls
-// row (TVs) (action) (HDMI, only for the switch actions) (hotkey combination) (▶ run) (delete).
-// The TVs multiselect chooses which TVs the command targets; an empty selection means "all enabled
-// TVs" and shows as "All TVs".
-// Edits go through the settings draft (autosaved like everything else); Run sends the row as
-// shown, so a command works immediately, even before the autosave lands.
+// A TV the command can target. `isLocal` decides the row's shape: a LAN TV runs a raw key sequence
+// (a text field) instead of a cloud action/HDMI dropdown.
+export type CommandTvChoice = {
+  deviceId: string;
+  // Plain-text name (alias → live label → host → id).
+  label: string;
+  isLocal: boolean;
+};
+
+// The user-defined command list (Settings → Commands): one card per command. A command targets a
+// single TV (or "All TVs"). What the row then shows depends on that TV:
+//   • a CLOUD TV (or "All TVs") → an action dropdown (+ HDMI for the switch actions), as before.
+//   • a LAN TV → a key-sequence text field (e.g. "HDMI, UP, UP, LEFT"), run instead of an action —
+//     there's no SmartThings action channel over the LAN.
+// Every row also has a hotkey field, an eye (pin to Main screen), a ▶ Run, and a delete.
+// Edits go through the settings draft (autosaved); Run sends the row as shown, so a command works
+// immediately, even before the autosave lands.
 export function CommandList({
   commands,
-  tvOptions,
-  tvLabel,
+  tvChoices,
   onAdd,
   onRemove,
   onChange,
@@ -54,11 +56,8 @@ export function CommandList({
   onToast,
 }: {
   commands: CommandSettings[];
-  // The known TVs, for the target checkboxes — the rich options (alias/title + "Cloud" badge +
-  // note · label/model · id subtitle) shared with the "TVs to control" selector.
-  tvOptions: readonly MultiSelectOption[];
-  // Plain-text name for a TV id, for the Run toast (the option label above is JSX, not a string).
-  tvLabel: (id: string) => string;
+  // The known TVs, for the single-select target dropdown, each tagged LAN vs cloud.
+  tvChoices: readonly CommandTvChoice[];
   onAdd: (cmd: CommandSettings) => void;
   onRemove: (id: string) => void;
   onChange: (id: string, patch: Partial<CommandSettings>) => void;
@@ -69,27 +68,39 @@ export function CommandList({
   // Id of the command currently running; every Run button is disabled meanwhile (the daemon's
   // trigger gate would reject a concurrent run anyway — don't offer one).
   const [runningId, setRunningId] = useState<string | null>(null);
-  // Command ids whose HDMI selector is in "Custom…" mode but still empty (the user picked Custom
-  // and hasn't typed yet). Once a value is typed, isCustomHdmi(hdmi) keeps the field open on its
-  // own, so this only tracks the transient empty state — hdmi="" would otherwise read as unset.
-  const [customPending, setCustomPending] = useState<ReadonlySet<string>>(new Set());
-  const setPending = (id: string, on: boolean) =>
-    setCustomPending((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
+
+  const choiceById = new Map(tvChoices.map((c) => [c.deviceId, c] as const));
+  // The TV-target dropdown options: "All TVs" first, then each known TV (with a LAN/Cloud hint so
+  // the mode is obvious). A checked-but-vanished id is appended as "(gone)" so it can be re-picked
+  // away rather than silently sticking to the command.
+  const tvOptions = (cmd: CommandSettings): SelectMenuOption[] => {
+    const opts: SelectMenuOption[] = [
+      { value: ALL_TVS, label: "All TVs" },
+      ...tvChoices.map((c) => {
+        const tag = c.isLocal ? "LAN" : "Cloud";
+        // Don't double the tag when the TV's own name already ends with it (e.g. "Office TV (LAN)").
+        const label = c.label.trim().toLowerCase().endsWith(`(${tag.toLowerCase()})`)
+          ? c.label
+          : `${c.label} (${tag})`;
+        return { value: c.deviceId, label };
+      }),
+    ];
+    const current = cmd.deviceIds[0];
+    if (current && !choiceById.has(current)) opts.push({ value: current, label: `${current} (gone)` });
+    return opts;
+  };
 
   const run = async (cmd: CommandSettings) => {
     setRunningId(cmd.id);
     try {
       const result = await window.tvAPI.runCommand(cmd);
-      const action = ACTION_OPTIONS.find((o) => o.value === cmd.action)?.label ?? cmd.action;
-      const tvs = cmd.deviceIds.length
-        ? cmd.deviceIds.map((id) => tvLabel(id)).join(", ")
-        : "all TVs";
-      if (result.ok) onToast("success", `${action} (${tvs}) — done`);
+      const target = cmd.deviceIds[0];
+      const isKeySeq = target ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:")) : false;
+      const what = isKeySeq
+        ? `Keys (${choiceById.get(target!)?.label ?? target})`
+        : ACTION_OPTIONS.find((o) => o.value === cmd.action)?.label ?? cmd.action;
+      const tvs = target ? choiceById.get(target)?.label ?? target : "all TVs";
+      if (result.ok) onToast("success", `${what} (${tvs}) — done`);
       else onToast("error", result.error || "Command failed");
     } finally {
       setRunningId(null);
@@ -103,15 +114,14 @@ export function CommandList({
       action: "tvOn",
       deviceIds: [],
       hdmi: "",
+      keySeq: "",
       hotkey: "",
       pinned: false,
     });
 
-  const toggleTv = (cmd: CommandSettings, tvId: string, checked: boolean) => {
-    const next = checked
-      ? [...new Set([...cmd.deviceIds, tvId])]
-      : cmd.deviceIds.filter((id) => id !== tvId);
-    onChange(cmd.id, { deviceIds: next });
+  // Change a command's single TV target. "All TVs" clears it; picking a TV stores just that id.
+  const setTarget = (cmd: CommandSettings, value: string) => {
+    onChange(cmd.id, { deviceIds: value === ALL_TVS ? [] : [value] });
   };
 
   return (
@@ -120,81 +130,60 @@ export function CommandList({
         <p className="hint">No commands yet — add one to run it from here or bind it to a hotkey.</p>
       )}
       {commands.map((cmd) => {
-        const hdmiEnabled = usesHdmi(cmd.action);
-        // Checked TVs that have since disappeared stay visible (by raw id) so they can be
-        // unchecked rather than silently sticking to the command.
-        const staleIds = cmd.deviceIds.filter((id) => !tvOptions.some((o) => o.value === id));
-        // Options for the target multiselect: the known TVs (rich options shared with the "TVs to
-        // control" selector), plus any checked-but-vanished ids so they can still be un-targeted
-        // rather than silently sticking to the command.
-        const tvSelectOptions: MultiSelectOption[] = [
-          ...tvOptions,
-          ...staleIds.map((id) => ({ value: id, label: `${id} (gone)` })),
-        ];
-        const selectedSet = new Set(cmd.deviceIds);
+        const target = cmd.deviceIds[0];
+        // A LAN target runs a key sequence instead of an action. Fall back to the id prefix if the
+        // TV isn't in the current choice list (e.g. temporarily unreachable) so the row shape is
+        // stable regardless of list load state.
+        const isKeySeq = target ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:")) : false;
+        const hdmiEnabled = !isKeySeq && usesHdmi(cmd.action);
         return (
           <div className="command-item" key={cmd.id}>
             <div className="command-main">
-              <MultiSelect
-                className="command-tvs-select"
-                ariaLabel="TVs this command targets"
-                noun="TV"
-                emptyMeansAll
-                placeholder="All TVs"
-                options={tvSelectOptions}
-                selected={selectedSet}
-                onChange={(tvId, checked) => toggleTv(cmd, tvId, checked)}
-              />
               <SelectMenu
-                className="command-action"
-                ariaLabel="Action"
-                value={cmd.action}
-                options={ACTION_OPTIONS}
-                onValueChange={(v) => {
-                  const action = v as CommandAction;
-                  // Entering an HDMI action seeds the selector; leaving one clears it.
-                  onChange(cmd.id, {
-                    action,
-                    hdmi: usesHdmi(action) ? cmd.hdmi || "HDMI1" : "",
-                  });
-                }}
+                className="command-tvs-select"
+                ariaLabel="TV this command targets"
+                value={target && !choiceById.has(target) ? target : (target ?? ALL_TVS)}
+                options={tvOptions(cmd)}
+                onValueChange={(v) => setTarget(cmd, v)}
               />
-              {hdmiEnabled &&
-                (() => {
-                  // The row is in custom mode when it holds a non-standard value, or the user just
-                  // picked "Custom…" and hasn't typed yet (tracked in customPending).
-                  const custom = isCustomHdmi(cmd.hdmi) || customPending.has(cmd.id);
-                  return (
-                    <>
-                      <SelectMenu
-                        ariaLabel="HDMI input"
-                        className="command-hdmi"
-                        value={custom ? CUSTOM_HDMI : cmd.hdmi || "HDMI1"}
-                        options={HDMI_OPTIONS}
-                        onValueChange={(v) => {
-                          if (v === CUSTOM_HDMI) {
-                            // Enter custom mode; keep any existing custom text, clear a fixed HDMI.
-                            setPending(cmd.id, true);
-                            if (!isCustomHdmi(cmd.hdmi)) onChange(cmd.id, { hdmi: "" });
-                          } else {
-                            // A fixed HDMI input replaces whatever was there and leaves custom mode.
-                            setPending(cmd.id, false);
-                            onChange(cmd.id, { hdmi: v });
-                          }
-                        }}
-                      />
-                      {custom && (
-                        <TextInput
-                          className="command-hdmi-custom"
-                          aria-label="Custom input name"
-                          placeholder="Input name (e.g. pc)"
-                          value={cmd.hdmi}
-                          onValueChange={(v) => onChange(cmd.id, { hdmi: v })}
-                        />
-                      )}
-                    </>
-                  );
-                })()}
+              {isKeySeq ? (
+                // LAN target → a raw key-sequence field replaces the action/HDMI dropdowns.
+                <TextInput
+                  className="command-keyseq"
+                  aria-label="Key sequence"
+                  placeholder="e.g. HDMI, UP, UP, LEFT"
+                  value={cmd.keySeq}
+                  onValueChange={(v) => onChange(cmd.id, { keySeq: v })}
+                />
+              ) : (
+                <>
+                  <SelectMenu
+                    className="command-action"
+                    ariaLabel="Action"
+                    value={cmd.action}
+                    options={ACTION_OPTIONS}
+                    onValueChange={(v) => {
+                      const action = v as CommandAction;
+                      // Entering an HDMI action seeds the selector; leaving one clears it.
+                      onChange(cmd.id, {
+                        action,
+                        hdmi: usesHdmi(action) ? cmd.hdmi || "HDMI1" : "",
+                      });
+                    }}
+                  />
+                  {hdmiEnabled && (
+                    <SelectMenu
+                      ariaLabel="HDMI input"
+                      className="command-hdmi"
+                      value={
+                        (HDMI_INPUTS as readonly string[]).includes(cmd.hdmi) ? cmd.hdmi : "HDMI1"
+                      }
+                      options={HDMI_OPTIONS}
+                      onValueChange={(v) => onChange(cmd.id, { hdmi: v })}
+                    />
+                  )}
+                </>
+              )}
               {/* Keyed by row so a deleted row's in-progress capture can't land on its neighbor. */}
               <HotkeyField
                 key={`hotkey-${cmd.id}`}

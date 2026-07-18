@@ -6,6 +6,9 @@ import {
   connectRemote,
   localDeviceId,
   pairWithTV,
+  normalizeRemoteKey,
+  parseKeySequence,
+  keyDelayMs,
   LocalTV,
   type MinimalWebSocket,
 } from "../src/api/local-tv.js";
@@ -137,6 +140,57 @@ describe("localDeviceId", () => {
   });
 });
 
+describe("normalizeRemoteKey", () => {
+  it("passes an explicit KEY_ through, upper-cased", () => {
+    expect(normalizeRemoteKey("key_enter")).toBe("KEY_ENTER");
+    expect(normalizeRemoteKey("KEY_HDMI2")).toBe("KEY_HDMI2");
+  });
+  it("maps numbered/bare HDMI and the 'pc' alias like an input name", () => {
+    expect(normalizeRemoteKey("hdmi2")).toBe("KEY_HDMI2");
+    expect(normalizeRemoteKey("HDMI")).toBe("KEY_HDMI");
+    expect(normalizeRemoteKey("pc")).toBe("KEY_HDMI2");
+  });
+  it("turns a bare directional/name token into its KEY_ form (unlike defaultInputKey)", () => {
+    expect(normalizeRemoteKey("UP")).toBe("KEY_UP");
+    expect(normalizeRemoteKey("left")).toBe("KEY_LEFT");
+    expect(normalizeRemoteKey("volup")).toBe("KEY_VOLUP");
+  });
+  it("returns '' for a blank token", () => {
+    expect(normalizeRemoteKey("   ")).toBe("");
+  });
+});
+
+describe("parseKeySequence", () => {
+  it("splits, trims, normalizes, and drops blanks", () => {
+    expect(parseKeySequence("HDMI, UP, UP, UP, LEFT, DOWN")).toEqual([
+      "KEY_HDMI",
+      "KEY_UP",
+      "KEY_UP",
+      "KEY_UP",
+      "KEY_LEFT",
+      "KEY_DOWN",
+    ]);
+    // Trailing/empty segments and stray whitespace are dropped.
+    expect(parseKeySequence("KEY_ENTER, , ,")).toEqual(["KEY_ENTER"]);
+    expect(parseKeySequence("")).toEqual([]);
+  });
+});
+
+describe("keyDelayMs", () => {
+  it("converts seconds to ms, clamping to the 5s cap", () => {
+    expect(keyDelayMs({ keyDelay: 2 })).toBe(2000);
+    expect(keyDelayMs({ keyDelay: 0.5 })).toBe(500);
+    expect(keyDelayMs({ keyDelay: 99 })).toBe(5000);
+  });
+  it("returns 0 for unset/zero/negative/junk raw-config values", () => {
+    // The daemon consumes raw loadConfig() output, so hand-edited junk must fall back safely.
+    expect(keyDelayMs({})).toBe(0);
+    expect(keyDelayMs({ keyDelay: 0 })).toBe(0);
+    expect(keyDelayMs({ keyDelay: -1 })).toBe(0);
+    expect(keyDelayMs({ keyDelay: "abc" as unknown as number })).toBe(0);
+  });
+});
+
 describe("LocalTV", () => {
   const config: TVConfig = {
     pcInput: "HDMI2",
@@ -223,6 +277,69 @@ describe("LocalTV", () => {
     }).setInputSource("local:tv", "local.remoteKey", "key_hdmi3");
     // A custom input typed as a raw remote key is normalized to upper case and sent as-is.
     expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI3"]);
+  });
+
+  it("sendKeys sends an explicit key list in order over one authorized WS, then closes", async () => {
+    const ws = new FakeWS();
+    const factory = (url: string) => {
+      expect(url).toContain("token=stored-token");
+      queueMicrotask(() => ws.accept());
+      return ws;
+    };
+    await new LocalTV(config, factory).sendKeys("local:tv", ["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
+    expect(ws.closed).toBe(true);
+  });
+
+  it("sendKeys waits the TV's keyDelay between keys, but not after the last", async () => {
+    const delayedConfig: TVConfig = {
+      ...config,
+      deviceConfigs: { "local:tv": { ...config.deviceConfigs!["local:tv"], keyDelay: 2 } },
+    };
+    const ws = new FakeWS();
+    const delays: number[] = [];
+    const fakeSleep = (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    };
+    await new LocalTV(delayedConfig, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }, fakeSleep).sendKeys("local:tv", ["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
+    expect(ws.sent.map((s) => JSON.parse(s).params.DataOfCmd)).toEqual(["KEY_HDMI", "KEY_UP", "KEY_LEFT"]);
+    expect(delays).toEqual([2000, 2000]);
+  });
+
+  it("sendKeys adds no extra wait when keyDelay is unset", async () => {
+    const ws = new FakeWS();
+    const delays: number[] = [];
+    const fakeSleep = (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    };
+    await new LocalTV(config, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }, fakeSleep).sendKeys("local:tv", ["KEY_HDMI", "KEY_UP"]);
+    expect(delays).toEqual([]);
+  });
+
+  it("sendKeys clamps a hand-edited out-of-range keyDelay to 5s", async () => {
+    const delayedConfig: TVConfig = {
+      ...config,
+      deviceConfigs: { "local:tv": { ...config.deviceConfigs!["local:tv"], keyDelay: 99 } },
+    };
+    const ws = new FakeWS();
+    const delays: number[] = [];
+    const fakeSleep = (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    };
+    await new LocalTV(delayedConfig, () => {
+      queueMicrotask(() => ws.accept());
+      return ws;
+    }, fakeSleep).sendKeys("local:tv", ["KEY_HDMI", "KEY_UP"]);
+    expect(delays).toEqual([5000]);
   });
 
   it("getStatus reports on when the info endpoint answers, off when it doesn't", async () => {

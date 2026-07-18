@@ -11,11 +11,11 @@ export type MultiSelectOption = {
   subtitle?: ReactNode;
 };
 
-// The selection body shared by MultiSelect's dropdown panel and the always-visible inline device
-// picker (DeviceMultiSelect). A "(Select all)" row at the top toggles every option at once; each
-// option below is a labeled row with an optional muted subtitle. It renders no trigger and owns no
-// open/closed state — the caller decides where it lives (inside a floating panel or straight in the
-// layout).
+// The selection body used by MultiSelect's dropdown panel (Commands target picker). A "(Select
+// all)" row at the top toggles every option at once; each option below is a labeled row with an
+// optional muted subtitle. It renders no trigger and owns no open/closed state — the caller decides
+// where it lives (inside a floating panel or straight in the layout). The "toggle" control is a
+// general inline-list mode (macOS switch per row) kept available for reuse.
 //
 // `control` picks how each row selects: "checkbox" (default) puts a checkbox on the left and shows
 // a partial selection as an indeterminate Select-all — right for the compact dropdown menu;

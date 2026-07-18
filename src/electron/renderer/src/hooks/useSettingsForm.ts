@@ -3,7 +3,6 @@ import type {
   AppSettings,
   CommandSettings,
   DeviceConfigSettings,
-  MainButtons,
   ThemePreference,
 } from "../types";
 
@@ -17,8 +16,6 @@ export interface SettingsDraft {
   // main process when every field is empty).
   deviceConfigs: Record<string, DeviceConfigSettings>;
   theme: ThemePreference;
-  // Which built-in power buttons the Main screen shows (each defaults to true).
-  mainButtons: MainButtons;
   // User-defined command list, in display order; persisted as a whole-list replace.
   commands: CommandSettings[];
 }
@@ -29,8 +26,10 @@ const EMPTY_DEVICE_CONFIG: DeviceConfigSettings = {
   host: "",
   mac: "",
   inputKeySeq: "",
+  keyDelay: "",
   // Read-only; the pairing IPC flips it via a settings reload, never the draft.
   paired: false,
+  autoWake: true,
 };
 
 const AUTOSAVE_DEBOUNCE_MS = 400;
@@ -52,17 +51,12 @@ export function useSettingsForm(
     selectedDeviceIds: new Set(initial.selectedDeviceIds),
     deviceConfigs: initial.deviceConfigs,
     theme: initial.theme,
-    mainButtons: initial.mainButtons,
     commands: initial.commands,
   });
   const [error, setError] = useState<string | null>(null);
 
   const set = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
-
-  // Toggle one built-in Main-screen power button on/off.
-  const setMainButton = (key: keyof MainButtons, shown: boolean) =>
-    setDraft((d) => ({ ...d, mainButtons: { ...d.mainButtons, [key]: shown } }));
 
   const toggleDevice = (deviceId: string, checked: boolean) =>
     setDraft((d) => {
@@ -72,7 +66,14 @@ export function useSettingsForm(
       return { ...d, selectedDeviceIds: next };
     });
 
-  const setDeviceConfig = (deviceId: string, key: keyof DeviceConfigSettings, value: string) =>
+  // Make exactly one TV the selected/controlled one — replaces the whole set with {deviceId}. The
+  // TV control list is single-select, so selecting a TV both edits it and makes it what "All TVs"
+  // commands act on. selectedDeviceIds stays a set on disk (a one-element array), so the daemon's
+  // "act on the selected TVs" path is unchanged.
+  const selectOnlyDevice = (deviceId: string) =>
+    setDraft((d) => ({ ...d, selectedDeviceIds: new Set([deviceId]) }));
+
+  const setDeviceConfig = <K extends keyof DeviceConfigSettings>(deviceId: string, key: K, value: DeviceConfigSettings[K]) =>
     setDraft((d) => ({
       ...d,
       deviceConfigs: {
@@ -132,8 +133,8 @@ export function useSettingsForm(
   return {
     draft,
     set,
-    setMainButton,
     toggleDevice,
+    selectOnlyDevice,
     setDeviceConfig,
     addCommand,
     removeCommand,

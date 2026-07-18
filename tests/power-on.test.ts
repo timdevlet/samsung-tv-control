@@ -446,3 +446,84 @@ describe("API logging is concise", () => {
     }
   });
 });
+
+// The daemon's automatic power-on (resume/boot) passes auto: true and must honor each TV's
+// autoWake opt-out; user-initiated calls never filter. The boot path is the identical
+// switch(..., { auto: true }) call, so these cover both automatic triggers.
+describe("automatic power-on opt-out (autoWake)", () => {
+  let logs: string[];
+
+  const mockConfigWith = (selectedDeviceIds: string[], deviceConfigs: object) => {
+    vi.resetModules();
+    vi.doMock("../src/config.js", () => ({
+      loadConfig: async () => ({ pcInput: "HDMI2", selectedDeviceIds, deviceConfigs }),
+      resolveToken: () => undefined,
+      saveConfig: async () => {},
+      resetConfig: async () => {},
+      CONFIG_PATH: "test-config.json",
+    }));
+  };
+
+  beforeEach(() => {
+    process.env.SMARTTHINGS_TOKEN = "test-token";
+    logs = [];
+    vi.spyOn(console, "log").mockImplementation((m: unknown) => void logs.push(String(m)));
+  });
+
+  afterEach(() => {
+    vi.doUnmock("../src/config.js");
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    delete process.env.SMARTTHINGS_TOKEN;
+  });
+
+  it("an automatic switch skips an opted-out TV but still acts on the rest", async () => {
+    mockConfigWith(["tv1", "tv2"], { tv1: { alias: "Bedroom", autoWake: false } });
+    const { fetchMock, calls } = makeFetch(0); // on immediately — no retry timers needed
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await expect(freshCreateApp().switch(undefined, undefined, { auto: true })).resolves.toBe(true);
+
+    expect(calls.some((c) => c.url.includes("/devices/tv2/"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/devices/tv1/"))).toBe(false);
+    expect(logs.some((l) => l.includes("[Bedroom] Automatic power-on is off"))).toBe(true);
+  });
+
+  it("a user-initiated switch ignores the opt-out", async () => {
+    mockConfigWith(["tv1", "tv2"], { tv1: { autoWake: false } });
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().switch();
+
+    expect(calls.some((c) => c.url.includes("/devices/tv1/"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/devices/tv2/"))).toBe(true);
+  });
+
+  it("resolves true with zero cloud traffic when every selected TV opts out", async () => {
+    mockConfigWith(["tv1"], { tv1: { autoWake: false } });
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    // Resolving (not throwing) matters: a throw would make the daemon's wake retry loop churn.
+    await expect(freshCreateApp().switch(undefined, undefined, { auto: true })).resolves.toBe(true);
+
+    expect(calls.length).toBe(0);
+    expect(logs.some((l) => l.includes("Automatic power-on is off for every selected TV"))).toBe(true);
+  });
+
+  it("explicit device ids combined with auto still filter", async () => {
+    mockConfigWith(["tv1"], { tv2: { autoWake: false } });
+    const { fetchMock, calls } = makeFetch(0);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { createApp: freshCreateApp } = await import("../src/app.js");
+    await freshCreateApp().switch(undefined, ["tv1", "tv2"], { auto: true });
+
+    expect(calls.some((c) => c.url.includes("/devices/tv1/"))).toBe(true);
+    expect(calls.some((c) => c.url.includes("/devices/tv2/"))).toBe(false);
+  });
+});

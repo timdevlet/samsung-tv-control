@@ -5,30 +5,6 @@ export type ThemePreference = "light" | "dark" | "system";
 
 export const THEME_PREFERENCES: readonly ThemePreference[] = ["light", "dark", "system"];
 
-// The three built-in power buttons on the Main screen, each individually toggleable in Settings.
-// The keys are the PowerAction values the Main screen dispatches.
-export type MainButtonKey = "on" | "off" | "offSleep";
-
-export const MAIN_BUTTON_KEYS: readonly MainButtonKey[] = ["on", "off", "offSleep"];
-
-// Which built-in power buttons the Main screen shows. Each defaults to true so an existing config
-// (no `mainButtons` key) keeps showing all three, exactly as before.
-export type MainButtons = Record<MainButtonKey, boolean>;
-
-// The built-in buttons shown when nothing is configured — all three, the historical Main screen.
-export const DEFAULT_MAIN_BUTTONS: MainButtons = { on: true, off: true, offSleep: true };
-
-// Coerce an untrusted value (config file / IPC payload) to a full MainButtons record: each key is
-// on unless it's explicitly stored as false, so a missing/malformed value shows every button.
-export function normalizeMainButtons(value: unknown): MainButtons {
-  const raw = typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
-  return {
-    on: raw.on !== false,
-    off: raw.off !== false,
-    offSleep: raw.offSleep !== false,
-  };
-}
-
 // Sentinel wsToken for a TV that accepts the connection but issues no token — some Samsung models
 // authorize a client by name/IP and never send one on ms.channel.connect. We still need a
 // non-empty marker so the TV persists as paired (empty wsToken = "not paired", and
@@ -51,6 +27,10 @@ export interface DeviceConfig {
   // Input the PC is on for THIS TV; unset = the shared pcInput. No longer editable in the UI —
   // kept because the daemon's automatic wake (resume/boot) still switches to the PC input.
   pcInput?: string;
+  // Whether the daemon's automatic power-on (PC resume / boot) acts on this TV. Default true;
+  // only `false` is ever persisted (see normalizeDeviceConfigs). Never affects user-initiated
+  // actions (hotkeys, tray, Power screen, commands).
+  autoWake?: boolean;
 
   // Local (LAN) transport fields — set for LAN-paired TVs (deviceId "local:…"); cloud TVs
   // (SmartThings UUIDs) leave them unset.
@@ -64,6 +44,10 @@ export interface DeviceConfig {
   // so an advanced user can record the keypresses that land on their PC input. Unset = send a
   // single source/HDMI key.
   inputKeySeq?: string;
+  // Extra seconds to wait between the keys of a sequence sent to this TV (> 0, ≤ 5; decimals ok)
+  // — some TVs/menus need more than the default ~200ms beat between presses. Unset = default
+  // pacing only.
+  keyDelay?: number;
   // The local WebSocket pairing token returned by the TV's on-screen "Allow" the first time we
   // connect. A SECRET — persisted here but never surfaced to the renderer (getSettings exposes
   // only a `paired` boolean) and only written by the pairing IPC, not through saveSettings.
@@ -111,8 +95,8 @@ export interface TVConfig {
   // Your preference
   // Target input the PC is on. Matched against the TV's supported-input map by
   // id ("HDMI3") first, then by label ("PC"). Default "HDMI2". No longer editable in the UI —
-  // kept because the daemon's automatic wake (resume/boot), the Main-screen buttons, and the
-  // tray actions still switch to the PC input; user-facing input choices live in `commands`.
+  // kept because the daemon's automatic wake (resume/boot) and the tray actions still switch to
+  // the PC input; user-facing input choices live in `commands`.
   pcInput: string;
 
   // App behavior
@@ -131,10 +115,6 @@ export interface TVConfig {
   // App color theme. "system" follows the OS light/dark setting. Unset means dark —
   // the app's historical appearance.
   theme?: ThemePreference;
-
-  // Which of the three built-in power buttons the Main screen shows. Each key defaults to true
-  // (unset = all three shown, the historical Main screen); set a key false to hide that button.
-  mainButtons?: Partial<MainButtons>;
 
   // User-defined command list (Settings → Commands): each entry is an action, an HDMI input for
   // the switch actions, and an optional hotkey. Run from the Settings list or via the hotkey;
@@ -155,6 +135,7 @@ export function mergeConfig(
     wakeHotkey?: string;
     offHotkey?: string;
     hotkeyBindings?: unknown;
+    mainButtons?: unknown;
   },
 ): TVConfig {
   // Accept the legacy "secret" key as an alias for clientSecret.
@@ -169,6 +150,9 @@ export function mergeConfig(
   delete parsed.wakeHotkey;
   delete parsed.offHotkey;
   delete parsed.hotkeyBindings;
+  // The built-in Main-screen power buttons are retired: the Main screen shows only pinned
+  // commands now. Drop the stale toggle map so old configs shed it on their next save.
+  delete parsed.mainButtons;
   return { ...DEFAULTS, ...parsed };
 }
 
@@ -229,20 +213,32 @@ export const COMMAND_ACTIONS: readonly CommandAction[] = [
 // by id first, then label).
 export const COMMAND_HDMI_INPUTS = ["HDMI1", "HDMI2", "HDMI3", "HDMI4", "HDMI5"] as const;
 
-// One entry of the user-defined command list.
+// True for a LAN-paired TV's synthetic deviceId (see localDeviceId() in api/local-tv.ts). A LAN
+// command runs a raw key sequence instead of a cloud action, so several places branch on this.
+export function isLocalDeviceId(deviceId: string): boolean {
+  return deviceId.startsWith("local:");
+}
+
+// One entry of the user-defined command list. A command targets a single TV. What it does depends
+// on that TV: a CLOUD TV runs `action` (with `hdmi` for the switch actions); a LAN TV runs the
+// raw `keySeq` instead (there's no SmartThings action channel over the LAN — see commandIsKeySeq).
 export interface CommandConfig {
   // Stable id (minted by the UI when the row is added) — React key + run/delete identity.
   id: string;
   action: CommandAction;
-  // The TVs this command targets (checkboxes in the UI). Unset/empty = every TV selected in
-  // Settings ("all enabled TVs").
+  // The TVs this command targets. Unset/empty = every TV selected in Settings ("all enabled TVs").
+  // The UI now picks a single TV, so this holds at most one id; the array shape is kept for
+  // backward/`forEachSelected` compatibility.
   deviceIds?: string[];
-  // Which HDMI input to switch to; present only for the HDMI-switching actions.
+  // Which HDMI input to switch to; present only for the HDMI-switching actions (cloud target).
   hdmi?: string;
+  // A comma-separated remote-key sequence (e.g. "HDMI, UP, UP, LEFT") run when the target is a LAN
+  // TV — used instead of `action`. Unset/empty for a cloud command. Normalized to KEY_* at send.
+  keySeq?: string;
   // Optional global hotkey (Electron accelerator). Unset/empty = run only from the Settings list.
   hotkey?: string;
-  // When true, this command is surfaced as a button on the Main screen (alongside the built-in
-  // power buttons). Unset/false = it lives only in the Settings list. Toggled by the eye icon.
+  // When true, this command is surfaced as a button on the Main screen (which shows only pinned
+  // commands). Unset/false = it lives only in the Settings list. Toggled by the eye icon.
   pinned?: boolean;
 }
 
@@ -251,8 +247,20 @@ export function commandUsesHdmi(action: CommandAction): boolean {
   return action === "tvOnHdmi" || action === "switchHdmi";
 }
 
-// Human label for a command, used in logs and as the accessible name of its Run button.
+// True when this command runs a raw key sequence rather than a cloud action: its single target is
+// a LAN TV. A command with no target (all enabled TVs) or a cloud target runs its `action`.
+export function commandIsKeySeq(cmd: CommandConfig): boolean {
+  const id = cmd.deviceIds?.[0];
+  return id != null && isLocalDeviceId(id);
+}
+
+// Human label for a command, used in logs and as the accessible name of its Run button. A LAN
+// key-sequence command is labeled by its sequence rather than a cloud action verb.
 export function commandLabel(cmd: CommandConfig): string {
+  if (commandIsKeySeq(cmd)) {
+    const seq = cmd.keySeq?.trim();
+    return seq ? `Keys: ${seq}` : "Key sequence";
+  }
   switch (cmd.action) {
     case "tvOn":
       return "TV on";
@@ -299,7 +307,12 @@ export function normalizeCommands(value: unknown): CommandConfig[] {
       ),
     ];
     if (deviceIds.length > 0) cmd.deviceIds = deviceIds;
-    if (commandUsesHdmi(cmd.action)) {
+    // A LAN-targeted command runs a raw key sequence instead of a cloud action — keep its keySeq
+    // (trimmed) and skip the HDMI handling. A cloud/all-TVs command keeps hdmi for the switch
+    // actions as before and sheds any stray keySeq.
+    if (commandIsKeySeq(cmd)) {
+      if (typeof entry.keySeq === "string" && entry.keySeq.trim()) cmd.keySeq = entry.keySeq.trim();
+    } else if (commandUsesHdmi(cmd.action)) {
       const raw = typeof entry.hdmi === "string" ? entry.hdmi.trim() : "";
       // A known HDMI input is normalized to its canonical upper-case id; any other non-empty value
       // is a custom input name/alias (e.g. "pc") kept verbatim so it can be matched by label or
@@ -337,7 +350,25 @@ export function normalizeDeviceConfigs(value: unknown): Record<string, DeviceCon
     // (it also keeps a paired-but-otherwise-empty TV from being pruned below).
     const token = (raw as Record<string, unknown>).wsToken;
     if (typeof token === "string" && token.trim()) entry.wsToken = token.trim();
+    // keyDelay is numeric, not a text field: accept a number or numeric string (the renderer
+    // sends the form value as a string), clamp to the 0–5s range, and store only a meaningful
+    // value (> 0) — 0/junk means "default pacing" and stays unpersisted.
+    const rawDelay = (raw as Record<string, unknown>).keyDelay;
+    if (typeof rawDelay === "number" || (typeof rawDelay === "string" && rawDelay.trim())) {
+      const n = Number(rawDelay);
+      if (Number.isFinite(n) && n > 0) entry.keyDelay = Math.min(5, n);
+    }
+    // autoWake defaults to true, so only the opt-out is stored — a strict `false` here keeps an
+    // opt-out-only entry from being pruned below, while `true` (or junk) stays unpersisted.
+    if ((raw as Record<string, unknown>).autoWake === false) entry.autoWake = false;
     if (Object.keys(entry).length > 0) result[deviceId] = entry;
   }
   return result;
+}
+
+// Whether the daemon's automatic power-on may act on this TV. Strict `!== false` because the
+// daemon consumes raw loadConfig() output (only the settings bridge normalizes), so hand-edited
+// junk values ("false", 0) safely fall back to enabled.
+export function autoWakeEnabled(cfg?: DeviceConfig): boolean {
+  return cfg?.autoWake !== false;
 }
