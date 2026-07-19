@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "./icons";
+import { ScrollArea } from "./ScrollArea";
 import "./GroupSelect.scss";
 
 export type GroupSelectOption = {
@@ -67,24 +68,26 @@ export function GroupSelect({
       </button>
       {open && (
         <div className="groupselect-panel" role="menu" aria-label={ariaLabel}>
-          {groups.map((g) => (
-            <div key={g.label} role="group" aria-label={g.label} className="groupselect-group">
-              <div aria-hidden="true" className="groupselect-heading">
-                {g.label}
+          <ScrollArea className="groupselect-scroll">
+            {groups.map((g) => (
+              <div key={g.label} role="group" aria-label={g.label} className="groupselect-group">
+                <div aria-hidden="true" className="groupselect-heading">
+                  {g.label}
+                </div>
+                {g.options.map((o) => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    role="menuitem"
+                    className="groupselect-option"
+                    onClick={() => onSelect(o.value)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
               </div>
-              {g.options.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  role="menuitem"
-                  className="groupselect-option"
-                  onClick={() => onSelect(o.value)}
-                >
-                  {o.label}
-                </button>
-              ))}
-            </div>
-          ))}
+            ))}
+          </ScrollArea>
         </div>
       )}
     </div>

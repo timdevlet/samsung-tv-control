@@ -35,6 +35,10 @@ export default function App() {
 
   const openSettings = useCallback(async () => {
     setView("settings"); // highlight the tab immediately; the body renders once loaded
+    // Suspend the daemon's global hotkeys while Settings is open so a combo typed into a hotkey
+    // capture field isn't swallowed by its own live registration (which blocks re-entering an
+    // already-bound combo).
+    window.tvAPI.setHotkeysSuspended(true);
     const [next, status] = await Promise.all([
       window.tvAPI.getSettings(),
       window.tvAPI.authStatus(),
@@ -49,6 +53,7 @@ export default function App() {
         void openSettings();
         return;
       }
+      window.tvAPI.setHotkeysSuspended(false); // leaving Settings re-arms the hotkeys
       setSettings(null); // so the next Settings visit gets a fresh mount with fresh data
       setView(next);
     },

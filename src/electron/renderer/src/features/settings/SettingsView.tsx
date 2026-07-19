@@ -437,12 +437,6 @@ export function SettingsView({
                       onValueChange={(v) => form.setDeviceConfig(activeTvId, "description", v)}
                     />
                   </Field>
-                  <SwitchField
-                    id="tvAutoWake"
-                    label="Turn on automatically when this PC wakes up"
-                    checked={activeDeviceConfig?.autoWake ?? true}
-                    onChange={(v) => form.setDeviceConfig(activeTvId, "autoWake", v)}
-                  />
                   {/* LAN pairing + key sequence — hidden for cloud TVs, which are reached through
                         SmartThings, not the local network. */}
                   {activeIsCloud ? (
@@ -468,12 +462,12 @@ export function SettingsView({
                         onPair={() => void onPair(activeTvId)}
                         paired={activePaired}
                       />
-                      <Field label="Delay between keys (seconds, 0–5)" htmlFor="tvKeyDelay">
+                      <Field label="Delay between keys (seconds, 0.00–5.00)" htmlFor="tvKeyDelay">
                         <NumberInput
                           id="tvKeyDelay"
                           min={0}
                           max={5}
-                          placeholder="0"
+                          placeholder="0.400"
                           value={activeDeviceConfig?.keyDelay ?? ""}
                           onValueChange={(v) => form.setDeviceConfig(activeTvId, "keyDelay", v)}
                         />
@@ -499,7 +493,8 @@ export function SettingsView({
           <p className="hint">
             Your own commands: pick the TV it targets. A cloud TV runs an action (and an HDMI input
             for the switch actions); a LAN TV runs a key sequence you type instead. Optionally bind
-            a hotkey, then run it with ▶. Toggle the eye to add it as a button on the Main screen.
+            a hotkey, then run it with ▶. Toggle the sunrise to run it automatically when this PC
+            wakes up, or the eye to add it as a button on the Main screen.
           </p>
           <CommandList
             commands={form.draft.commands}

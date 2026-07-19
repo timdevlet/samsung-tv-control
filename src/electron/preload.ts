@@ -51,6 +51,10 @@ const tvAPI = {
   discoverTVs: (): Promise<DiscoverResult> => ipcRenderer.invoke("tv:discover"),
   pairTV: (args: { deviceId?: string; host: string; mac: string }): Promise<PairResult> =>
     ipcRenderer.invoke("tv:pair", args),
+  // Tell the main process whether the Settings tab is open. While it is, the daemon suspends its
+  // global command hotkeys so a combo typed into a capture field isn't swallowed by its own live
+  // registration (which is what blocks re-entering an already-bound combo).
+  setHotkeysSuspended: (suspended: boolean): void => ipcRenderer.send("hotkeys:suspend", suspended),
   // Open the Settings modal when asked from the tray. Returns an unsubscribe function.
   onOpenSettings: (cb: () => void): (() => void) => {
     const handler = (): void => cb();

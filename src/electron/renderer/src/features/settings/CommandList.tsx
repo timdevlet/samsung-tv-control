@@ -3,7 +3,14 @@ import { Button } from "../../components/Button";
 import { GroupSelect } from "../../components/GroupSelect";
 import { HotkeyField } from "../../components/HotkeyField";
 import { IconButton } from "../../components/IconButton";
-import { EyeIcon, EyeOffIcon, PlayIcon, TrashIcon } from "../../components/icons";
+import {
+  EyeIcon,
+  EyeOffIcon,
+  MoonIcon,
+  PlayIcon,
+  SunriseIcon,
+  TrashIcon,
+} from "../../components/icons";
 import { SelectMenu, type SelectMenuOption } from "../../components/SelectMenu";
 import { TextInput } from "../../components/TextInput";
 import { appendKeyToken, REMOTE_KEY_GROUPS } from "../../lib/remoteKeys";
@@ -15,7 +22,6 @@ const ACTION_OPTIONS: readonly { value: CommandAction; label: string }[] = [
   { value: "tvOn", label: "Turn on TV" },
   { value: "tvOff", label: "Turn off TV" },
   { value: "tvOnHdmi", label: "TV on + HDMI" },
-  { value: "tvOffSleepPc", label: "TV off + sleep PC" },
   { value: "switchHdmi", label: "Switch HDMI" },
 ];
 
@@ -117,6 +123,8 @@ export function CommandList({
       keySeq: "",
       hotkey: "",
       pinned: false,
+      runOnWake: false,
+      sleepPc: false,
     });
 
   // Change a command's single TV target: store just that id.
@@ -166,7 +174,7 @@ export function CommandList({
                   <GroupSelect
                     className="command-keyseq-picker"
                     ariaLabel="Add a remote key to the sequence"
-                    triggerLabel="Add key"
+                    triggerLabel="+"
                     groups={REMOTE_KEY_GROUPS}
                     onSelect={(token) =>
                       onChange(cmd.id, { keySeq: appendKeyToken(cmd.keySeq, token) })
@@ -211,6 +219,21 @@ export function CommandList({
                 onValidationError={onValidationError}
               />
               <IconButton
+                aria-label={
+                  cmd.runOnWake ? "Don't run when this PC wakes up" : "Run when this PC wakes up"
+                }
+                title={
+                  cmd.runOnWake
+                    ? "Runs automatically when this PC wakes up — click to disable"
+                    : "Run this command automatically when this PC wakes up"
+                }
+                className={cmd.runOnWake ? "command-wake active" : "command-wake"}
+                aria-pressed={cmd.runOnWake}
+                onClick={() => onChange(cmd.id, { runOnWake: !cmd.runOnWake })}
+              >
+                <SunriseIcon />
+              </IconButton>
+              <IconButton
                 aria-label={cmd.pinned ? "Hide from main screen" : "Show on main screen"}
                 title={
                   cmd.pinned
@@ -222,6 +245,21 @@ export function CommandList({
                 onClick={() => onChange(cmd.id, { pinned: !cmd.pinned })}
               >
                 {cmd.pinned ? <EyeIcon /> : <EyeOffIcon />}
+              </IconButton>
+              <IconButton
+                aria-label={
+                  cmd.sleepPc ? "Don't sleep this PC after running" : "Sleep this PC after running"
+                }
+                title={
+                  cmd.sleepPc
+                    ? "Puts this PC to sleep after the command runs — click to disable"
+                    : "Put this PC to sleep after this command runs"
+                }
+                className={cmd.sleepPc ? "command-sleep active" : "command-sleep"}
+                aria-pressed={cmd.sleepPc}
+                onClick={() => onChange(cmd.id, { sleepPc: !cmd.sleepPc })}
+              >
+                <MoonIcon />
               </IconButton>
               <IconButton
                 aria-label="Run command"

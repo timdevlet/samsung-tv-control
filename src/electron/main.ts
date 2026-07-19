@@ -68,6 +68,17 @@ function applyTheme(theme: AppSettings["theme"]): void {
 // When false, closing the window quits the app instead of hiding to the tray.
 let minimizeToTrayOnClose = true;
 
+// Whether the renderer's Settings tab is currently open. Set by the hotkeys:suspend IPC. The
+// daemon's global hotkeys are suspended only while the Settings tab is open AND the window is
+// actually visible — so hiding the window (close-to-tray) while on the Settings tab doesn't leave
+// the hotkeys silently dead, and showing it again re-suspends them.
+let settingsTabOpen = false;
+
+function applyHotkeyState(): void {
+  const visible = !!win && !win.isDestroyed() && win.isVisible();
+  daemon?.setHotkeysEnabled(!(settingsTabOpen && visible));
+}
+
 function pushHistory(entry: LogEntry): void {
   history.push(entry);
   if (history.length > MAX_HISTORY) history.shift();
@@ -117,6 +128,11 @@ function createWindow(): BrowserWindow {
       app.quit();
     }
   });
+
+  // Keep the hotkey suspension in step with visibility: a window hidden to the tray while on the
+  // Settings tab must not keep the hotkeys disabled, and reopening it must re-suspend them.
+  w.on("show", applyHotkeyState);
+  w.on("hide", applyHotkeyState);
 
   return w;
 }
@@ -227,6 +243,13 @@ async function start(): Promise<void> {
   ipcMain.handle("log:history", () => history);
   ipcMain.on("log:clear", () => {
     history.length = 0;
+  });
+  // The renderer reports when the Settings tab opens/closes; suspend the global hotkeys while it's
+  // open (and visible) so a combo typed into a capture field reaches the renderer instead of firing
+  // its own command. See applyHotkeyState / the window show/hide handlers.
+  ipcMain.on("hotkeys:suspend", (_e, suspended: unknown) => {
+    settingsTabOpen = suspended === true;
+    applyHotkeyState();
   });
   // Run a user-defined command (Settings → Commands). The renderer sends the row as shown —
   // running the on-screen state directly means the Run button works even inside the autosave

@@ -133,6 +133,49 @@ describe("normalizeCommands", () => {
       { id: "c", action: "tvOff" },
     ]);
   });
+
+  it("keeps runOnWake only for a literal true, dropping it otherwise (default = don't run on wake)", () => {
+    expect(normalizeCommands([{ id: "a", action: "tvOn", runOnWake: true }])).toEqual([
+      { id: "a", action: "tvOn", runOnWake: true },
+    ]);
+    // Anything that isn't boolean true sheds the field — only runOnWake:true runs automatically.
+    expect(
+      normalizeCommands([
+        { id: "a", action: "tvOn", runOnWake: false },
+        { id: "b", action: "tvOff", runOnWake: "yes" },
+        { id: "c", action: "tvOff" },
+      ]),
+    ).toEqual([
+      { id: "a", action: "tvOn" },
+      { id: "b", action: "tvOff" },
+      { id: "c", action: "tvOff" },
+    ]);
+  });
+
+  it("keeps sleepPc only for a literal true, dropping it otherwise (default = leave the PC alone)", () => {
+    expect(normalizeCommands([{ id: "a", action: "tvOff", sleepPc: true }])).toEqual([
+      { id: "a", action: "tvOff", sleepPc: true },
+    ]);
+    expect(
+      normalizeCommands([
+        { id: "a", action: "tvOff", sleepPc: false },
+        { id: "b", action: "tvOff", sleepPc: "yes" },
+      ]),
+    ).toEqual([
+      { id: "a", action: "tvOff" },
+      { id: "b", action: "tvOff" },
+    ]);
+  });
+
+  it("migrates the retired tvOffSleepPc action to tvOff + sleepPc, keeping hotkey/pin/target", () => {
+    expect(
+      normalizeCommands([
+        { id: "a", action: "tvOffSleepPc", deviceIds: ["tv1"], hotkey: "Command+9", pinned: true },
+      ]),
+    ).toEqual([
+      { id: "a", action: "tvOff", deviceIds: ["tv1"], hotkey: "Command+9", pinned: true, sleepPc: true },
+    ]);
+  });
 });
 
 describe("commandUsesHdmi", () => {
@@ -141,7 +184,6 @@ describe("commandUsesHdmi", () => {
     expect(commandUsesHdmi("switchHdmi")).toBe(true);
     expect(commandUsesHdmi("tvOn")).toBe(false);
     expect(commandUsesHdmi("tvOff")).toBe(false);
-    expect(commandUsesHdmi("tvOffSleepPc")).toBe(false);
   });
 });
 
@@ -158,7 +200,6 @@ describe("commandLabel", () => {
   it("names each action, including the chosen HDMI input", () => {
     expect(commandLabel({ id: "a", action: "tvOn" })).toBe("TV on");
     expect(commandLabel({ id: "a", action: "tvOff" })).toBe("TV off");
-    expect(commandLabel({ id: "a", action: "tvOffSleepPc" })).toBe("TV off + sleep PC");
     expect(commandLabel({ id: "a", action: "tvOnHdmi", hdmi: "HDMI3" })).toBe("TV on → HDMI3");
     expect(commandLabel({ id: "a", action: "switchHdmi", hdmi: "HDMI5" })).toBe("Switch to HDMI5");
   });

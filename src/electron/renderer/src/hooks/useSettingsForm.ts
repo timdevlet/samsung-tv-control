@@ -24,7 +24,6 @@ const EMPTY_DEVICE_CONFIG: DeviceConfigSettings = {
   keyDelay: "",
   // Read-only; the pairing IPC flips it via a settings reload, never the draft.
   paired: false,
-  autoWake: true,
 };
 
 const AUTOSAVE_DEBOUNCE_MS = 400;

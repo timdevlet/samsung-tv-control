@@ -76,6 +76,27 @@ export function EyeOffIcon() {
   );
 }
 
+// Sun rising over a horizon, for the "run this command when the PC wakes up" toggle.
+export function SunriseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M1.5 12.5h13M4 9.5a4 4 0 0 1 8 0"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 1.5v2M2.6 4.6l1 1M13.4 4.6l-1 1M1.5 9.5h1M13.5 9.5h1"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function LogsIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">

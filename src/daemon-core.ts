@@ -52,6 +52,14 @@ const WAKE_RETRY_MS = 3000;
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+// Log line for each failed attempt of a wake-time operation (see withRetry).
+const wakeRetryLog =
+  (label: string) =>
+  (attempt: number, err: unknown): void =>
+    log(
+      `${label}: attempt ${attempt}/${WAKE_ATTEMPTS} failed (${err instanceof Error ? err.message : String(err)}) — retrying in ${WAKE_RETRY_MS / 1000}s...`,
+    );
+
 export interface Daemon {
   // Wake the TV and switch it to the PC input (with the post-wake retry loop). The result is for
   // interactive callers (the renderer's power buttons); tray/watcher callers ignore it. An
@@ -71,6 +79,11 @@ export interface Daemon {
   // Re-read the command list and re-register its hotkeys. Called after Settings saves so a
   // changed combo takes effect without restarting the daemon.
   reloadHotkeys(): Promise<void>;
+  // Enable or disable the global command hotkeys at runtime without discarding the command list.
+  // The Settings tab disables them (enabled=false) while it's open so a combo the user types into a
+  // capture field is seen by the renderer instead of being swallowed by its own global
+  // registration; leaving Settings re-enables them.
+  setHotkeysEnabled(enabled: boolean): void;
   // Tear down the wake watcher and unregister the global hotkeys.
   stop(): void;
 }
@@ -83,9 +96,15 @@ export async function startDaemon(): Promise<Daemon> {
   const app = createApp();
   const gate = new TriggerGate(COOLDOWN_MS);
 
-  // The user-defined command list (Settings → Commands) — the only source of hotkeys. Reloaded
-  // by reloadHotkeys() so an edited command (or combo) takes effect without a restart.
+  // The user-defined command list (Settings → Commands) — the only source of hotkeys and of the
+  // commands run automatically on wake. Reloaded by reloadHotkeys() so an edited command (or combo,
+  // or its run-on-wake flag) takes effect without a restart.
   let commands: CommandConfig[] = [];
+
+  // Whether the global command hotkeys are currently armed. Flipped off by setHotkeysEnabled while
+  // the Settings tab is open (so a capture field can see a combo that's also a live hotkey) and
+  // back on when it closes. registerHotkeys() honors it, so a reload while suspended stays inert.
+  let hotkeysEnabled = true;
 
   // The device ids a trigger should pass to app.switch()/app.off(). undefined = the Settings
   // selection, resolved inside app.ts — used by the tray/IPC/wake-watch callers that pass no
@@ -179,19 +198,26 @@ export async function startDaemon(): Promise<Daemon> {
       // until the machine resumes, and the resume-time triggerOn must not find the gate busy.
       gate.release(Date.now());
     }
-    if (!sleepAfter) return result;
+    if (sleepAfter) sleepThisPc();
+    return result;
+  }
+
+  // Put this PC to sleep. Shared by the tray's "TV off + sleep" action (via runOff) and by any
+  // command carrying the sleep-PC flag (see triggerCommand). Callers release the trigger gate
+  // first: sleepPc()'s child may not resolve until the machine resumes, and the resume-time
+  // reconcile must not find the gate busy.
+  function sleepThisPc(): void {
     // In mock mode only the TV is fake — sleepPc() would suspend the actual dev machine.
     if (isMockMode()) {
       log("Mock mode — skipping PC sleep.");
-      return result;
+      return;
     }
     log("Putting this PC to sleep...");
-    // Detached for the same reason the gate releases early: awaiting sleepPc() would keep the
-    // renderer's invoke pending through the whole sleep cycle.
+    // Detached: awaiting sleepPc() would keep the renderer's invoke pending through the whole
+    // sleep cycle.
     void sleepPc().catch((e: unknown) => {
       logError(`sleep failed: ${e instanceof Error ? e.message : String(e)}`);
     });
-    return result;
   }
 
   function triggerOffAndSleep(target?: HotkeyTarget): Promise<ActionResult> {
@@ -204,16 +230,23 @@ export async function startDaemon(): Promise<Daemon> {
   }
 
   // Gate-wrapped runner for the simple one-shot commands (power on / input only) — same busy
-  // rejection and no-TVs-selected result as the built-in triggers, no retry loop (these are
-  // always explicit user actions, not post-resume reconciles).
-  async function runSimple(label: string, op: () => Promise<boolean>): Promise<ActionResult> {
+  // rejection and no-TVs-selected result as the built-in triggers. `retry` adds the post-resume
+  // retry loop (WAKE_ATTEMPTS × WAKE_RETRY_MS) so a wake command outlasts the network reconnect,
+  // just like triggerOn; an explicit user run passes it off and fails fast.
+  async function runSimple(
+    label: string,
+    op: () => Promise<boolean>,
+    retry = false,
+  ): Promise<ActionResult> {
     if (!gate.tryAcquire(Date.now())) {
       log(`${label} ignored — a command is still running.`);
       return { ok: false, error: "A command is already running.", busy: true };
     }
     log(`\n${label} → running...`);
     try {
-      const acted = await op();
+      const acted = retry
+        ? await withRetry(op, WAKE_ATTEMPTS, WAKE_RETRY_MS, sleep, wakeRetryLog(label))
+        : await op();
       return acted
         ? { ok: true }
         : { ok: false, error: "No TVs selected — choose one in Settings." };
@@ -228,7 +261,22 @@ export async function startDaemon(): Promise<Daemon> {
   // Run one user-defined command against its checked TVs, or every selected TV when none are
   // checked ("all enabled TVs"). Routed to the same underlying operations as the built-in
   // triggers so gating/logging/results stay uniform.
-  async function triggerCommand(cmd: CommandConfig): Promise<ActionResult> {
+  // `retryOnWake` adds the post-resume retry loop to the one-shot actions (power on / input only /
+  // key sequence) so a command run automatically on wake survives the network still reconnecting —
+  // matching triggerOn, which already retries. An explicit user run (hotkey, tray, ▶) leaves it off
+  // and fails fast. tvOnHdmi always retries via triggerOn regardless.
+  async function triggerCommand(cmd: CommandConfig, retryOnWake = false): Promise<ActionResult> {
+    const result = await runCommandAction(cmd, retryOnWake);
+    // After the action, put this PC to sleep if the command opts in (the moon toggle) — regardless
+    // of the action's result, matching the old "TV off + sleep PC" action which slept even when the
+    // off call failed. The action runners have already released the trigger gate, and sleepThisPc
+    // runs detached, so this returns immediately.
+    if (cmd.sleepPc) sleepThisPc();
+    return result;
+  }
+
+  // Run a command's action (before the optional PC sleep) and return its result.
+  async function runCommandAction(cmd: CommandConfig, retryOnWake: boolean): Promise<ActionResult> {
     const label = `Command "${commandLabel(cmd)}"`;
     // A LAN-targeted command runs its raw key sequence instead of a cloud action (its single target
     // is a `local:` TV). Split the stored sequence into tokens; triggerSendKeys normalizes them to
@@ -240,7 +288,7 @@ export async function startDaemon(): Promise<Daemon> {
         .split(",")
         .map((k) => k.trim())
         .filter(Boolean);
-      return triggerSendKeys(deviceId, tokens);
+      return triggerSendKeys(deviceId, tokens, retryOnWake);
     }
     // undefined = the Settings selection; a targeted command carries its explicit ids.
     const ids = cmd.deviceIds?.length ? cmd.deviceIds : undefined;
@@ -249,15 +297,13 @@ export async function startDaemon(): Promise<Daemon> {
       : undefined;
     switch (cmd.action) {
       case "tvOn":
-        return runSimple(label, () => app.powerOn(ids));
+        return runSimple(label, () => app.powerOn(ids), retryOnWake);
       case "tvOff":
         return runOff(false, label, target);
-      case "tvOffSleepPc":
-        return runOff(true, label, target);
       case "tvOnHdmi":
         return triggerOn(target, false, cmd.hdmi, label);
       case "switchHdmi":
-        return runSimple(label, () => app.switchInputOnly(cmd.hdmi ?? "HDMI1", ids));
+        return runSimple(label, () => app.switchInputOnly(cmd.hdmi ?? "HDMI1", ids), retryOnWake);
     }
   }
 
@@ -268,7 +314,11 @@ export async function startDaemon(): Promise<Daemon> {
   // pooled, kept-alive socket and must fire as fast as the user presses — gating them would drop
   // rapid presses as "already running". (The gate still protects the power/switch actions, where a
   // held combo could otherwise spawn concurrent wake handlers.)
-  async function triggerSendKeys(deviceId: string, keys: string[]): Promise<ActionResult> {
+  async function triggerSendKeys(
+    deviceId: string,
+    keys: string[],
+    retry = false,
+  ): Promise<ActionResult> {
     if (!deviceId.startsWith("local:")) {
       return { ok: false, error: "Only LAN TVs can run a raw key sequence." };
     }
@@ -278,11 +328,41 @@ export async function startDaemon(): Promise<Daemon> {
     const label = `Send keys [${keys.join(", ")}]`;
     log(`\n${label} → running...`);
     try {
-      await app.sendKeys(deviceId, keys);
+      // `retry` (a wake command) rides out the post-resume reconnect like the power actions.
+      if (retry) {
+        await withRetry(
+          () => app.sendKeys(deviceId, keys),
+          WAKE_ATTEMPTS,
+          WAKE_RETRY_MS,
+          sleep,
+          wakeRetryLog(label),
+        );
+      } else {
+        await app.sendKeys(deviceId, keys);
+      }
       return { ok: true };
     } catch (e) {
       logError(`${label} failed: ${e instanceof Error ? e.message : String(e)}`);
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  // Run the commands the user flagged "run on wake" (Settings → Commands → sunrise toggle), in
+  // list order, one at a time. This is the entire automatic-wake behavior now: fires on PC resume
+  // and at boot. Each command runs with the post-resume retry loop (retryOnWake) so it outlasts the
+  // network still reconnecting. Sequential — they share the trigger gate, so overlapping them would
+  // just make the later ones bounce as "already running". With nothing flagged, wake is a no-op.
+  async function runWakeCommands(reason: string): Promise<void> {
+    const wakeCmds = commands.filter((c) => c.runOnWake);
+    if (wakeCmds.length === 0) {
+      log(`\n${reason} → no run-on-wake commands set; leaving the TV as-is.`);
+      return;
+    }
+    log(
+      `\n${reason} → running ${wakeCmds.length} run-on-wake command${wakeCmds.length === 1 ? "" : "s"}...`,
+    );
+    for (const cmd of wakeCmds) {
+      await triggerCommand(cmd, true);
     }
   }
 
@@ -301,6 +381,9 @@ export async function startDaemon(): Promise<Daemon> {
   // the old low-level tap there's no permission prompt to satisfy.
   function registerHotkeys(): void {
     globalShortcut.unregisterAll();
+    // Suspended (Settings tab open): leave every combo unregistered so the OS lets the keystrokes
+    // through to the capture field. A later setHotkeysEnabled(true) / reloadHotkeys re-arms them.
+    if (!hotkeysEnabled) return;
     const arm = (accel: string, label: string, handler: () => void): void => {
       try {
         if (!globalShortcut.register(accel, handler)) {
@@ -314,21 +397,28 @@ export async function startDaemon(): Promise<Daemon> {
         );
       }
     };
-    // Each accelerator registers with the OS exactly once. When two commands share a combo the
-    // first in list order wins and the duplicate is skipped with a warning — one keypress must
-    // not fire two commands at once.
-    const used = new Set<string>();
+    // Group commands by accelerator (a combo can be registered with the OS only once), then arm
+    // each combo with a handler that fires every command bound to it. Commands sharing a combo run
+    // concurrently on the keypress — fire-and-forget, so gate-free key-sequence sends (the common
+    // case) go out in parallel, e.g. the same key to several TVs at once. The trigger gate still
+    // serializes the power/switch actions among themselves, so if two of *those* share a combo the
+    // second is skipped as "busy" while the first runs — only the raw key sends are truly parallel.
+    const byAccel = new Map<string, CommandConfig[]>();
     for (const cmd of commands) {
       const accel = cmd.hotkey?.trim();
       if (!accel) continue;
-      if (used.has(accel)) {
-        logError(
-          `Hotkey "${hotkeyLabel(accel, PLATFORM)}" is already bound — skipping it for command "${commandLabel(cmd)}".`,
-        );
-        continue;
-      }
-      used.add(accel);
-      arm(accel, `command "${commandLabel(cmd)}"`, () => void triggerCommand(cmd));
+      const group = byAccel.get(accel);
+      if (group) group.push(cmd);
+      else byAccel.set(accel, [cmd]);
+    }
+    for (const [accel, cmds] of byAccel) {
+      const label =
+        cmds.length === 1
+          ? `command "${commandLabel(cmds[0])}"`
+          : `${cmds.length} commands (${cmds.map(commandLabel).join(", ")})`;
+      arm(accel, label, () => {
+        for (const cmd of cmds) void triggerCommand(cmd);
+      });
     }
   }
 
@@ -336,20 +426,18 @@ export async function startDaemon(): Promise<Daemon> {
   registerHotkeys();
 
   // If the daemon started right after the machine powered on (e.g. launched as a boot/login
-  // item), the PC's wake happened before any tick existed, so the wake watcher can't detect
-  // it. Reconcile once: ensure the TV is on and on PC input. uptimeSeconds() is seconds since
-  // system boot (not process start), cross-platform.
+  // item), the PC's wake happened before any tick existed, so the wake watcher can't detect it.
+  // Reconcile once: run the flagged run-on-wake commands. uptimeSeconds() is seconds since system
+  // boot (not process start), cross-platform.
   if (isWithinBootWindow(uptimeSeconds())) {
-    log("\nDaemon started near boot → waking TV if it was off...");
-    void triggerOn(undefined, true);
+    void runWakeCommands("Daemon started near boot");
   }
 
   // globalShortcut registrations survive sleep/wake on their own (the OS owns them), so unlike the
-  // old low-level tap there's nothing to re-arm here — just wake the TV.
+  // old low-level tap there's nothing to re-arm here — just run the run-on-wake commands.
   const stopWake = onWake((sleptMs) => {
     const mins = Math.round(sleptMs / 60_000);
-    log(`\nPC woke from sleep (~${mins} min) → waking TV if it was off...`);
-    void triggerOn(undefined, true);
+    void runWakeCommands(`PC woke from sleep (~${mins} min)`);
   });
 
   // Log each command hotkey so the active bindings are visible at startup and after a reload.
@@ -360,8 +448,18 @@ export async function startDaemon(): Promise<Daemon> {
       }
     }
   }
+  // Log the run-on-wake commands so the automatic behavior is visible at startup and after a reload.
+  function logWakeCommands(): void {
+    const wakeCmds = commands.filter((c) => c.runOnWake);
+    if (wakeCmds.length === 0) {
+      log("  No run-on-wake commands set — the TV is left as-is when this PC resumes.");
+      return;
+    }
+    log(`  On PC resume/boot, runs ${wakeCmds.length} command${wakeCmds.length === 1 ? "" : "s"}:`);
+    for (const cmd of wakeCmds) log(`    • ${commandLabel(cmd)}`);
+  }
   log("TV daemon running.");
-  log("  Auto-wakes the TV when this PC resumes from sleep.");
+  logWakeCommands();
   logHotkeys();
 
   // Re-read the command list and re-register so a changed combo takes effect without restarting.
@@ -370,7 +468,18 @@ export async function startDaemon(): Promise<Daemon> {
     registerHotkeys();
     const commandKeys = commands.filter((c) => c.hotkey?.trim()).length;
     log(`Hotkeys updated → ${commandKeys} command binding${commandKeys === 1 ? "" : "s"}.`);
+    logWakeCommands();
     logHotkeys();
+  }
+
+  // Arm or disarm the global command hotkeys without touching the command list. Called by the
+  // Settings-tab open/close bridge (see src/electron/main.ts) so a combo typed into a capture field
+  // isn't intercepted by its own live registration.
+  function setHotkeysEnabled(enabled: boolean): void {
+    if (hotkeysEnabled === enabled) return;
+    hotkeysEnabled = enabled;
+    registerHotkeys();
+    log(enabled ? "Hotkeys re-enabled." : "Hotkeys suspended while Settings is open.");
   }
 
   function stop(): void {
@@ -385,6 +494,7 @@ export async function startDaemon(): Promise<Daemon> {
     triggerCommand,
     sendKeys: triggerSendKeys,
     reloadHotkeys,
+    setHotkeysEnabled,
     stop,
   };
 }

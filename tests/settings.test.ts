@@ -36,16 +36,8 @@ describe("deviceConfigs in getSettings", () => {
         inputKeySeq: "",
         keyDelay: "",
         paired: false,
-        autoWake: true,
       },
     });
-  });
-
-  it("exposes autoWake as true when unset and false when the opt-out is stored", async () => {
-    store.deviceConfigs = { tv1: { alias: "On by default" }, tv2: { alias: "Opted out", autoWake: false } };
-    const settings = await getSettings();
-    expect(settings.deviceConfigs.tv1.autoWake).toBe(true);
-    expect(settings.deviceConfigs.tv2.autoWake).toBe(false);
   });
 });
 
@@ -116,32 +108,29 @@ describe("deviceConfigs in saveSettings", () => {
     store.deviceConfigs = { tv1: { alias: "65 TV", pcInput: "HDMI3" } };
     await saveSettings({
       deviceConfigs: {
-        tv1: { alias: "Renamed", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: true },
+        tv1: { alias: "Renamed", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
       },
     });
     expect(store.deviceConfigs).toEqual({ tv1: { alias: "Renamed", pcInput: "HDMI3" } });
   });
 
-  it("persists only the autoWake opt-out: saving false stores it, saving true leaves it absent", async () => {
+  it("carries a stored autoWake opt-out forward across a save (the UI no longer edits it)", async () => {
+    // autoWake is retired from the UI but kept in the schema; a stored opt-out must survive the
+    // renderer's whole-map save, which never sends it.
+    store.deviceConfigs = { tv1: { alias: "TV", autoWake: false } };
     await saveSettings({
       deviceConfigs: {
-        tv1: { alias: "TV", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: false },
+        tv1: { alias: "Renamed", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
       },
     });
-    expect(store.deviceConfigs).toEqual({ tv1: { alias: "TV", autoWake: false } });
-
-    await saveSettings({
-      deviceConfigs: {
-        tv1: { alias: "TV", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: true },
-      },
-    });
-    expect(store.deviceConfigs).toEqual({ tv1: { alias: "TV" } });
+    expect(store.deviceConfigs).toEqual({ tv1: { alias: "Renamed", autoWake: false } });
   });
 
-  it("keeps an entry alive when the opt-out is its only remaining setting", async () => {
+  it("keeps an entry alive when a carried-forward opt-out is its only remaining setting", async () => {
+    store.deviceConfigs = { tv1: { autoWake: false } };
     await saveSettings({
       deviceConfigs: {
-        tv1: { alias: "", description: "", host: "", mac: "", inputKeySeq: "", paired: false, autoWake: false },
+        tv1: { alias: "", description: "", host: "", mac: "", inputKeySeq: "", paired: false },
       },
     });
     expect(store.deviceConfigs).toEqual({ tv1: { autoWake: false } });
@@ -151,13 +140,13 @@ describe("deviceConfigs in saveSettings", () => {
 describe("commands in getSettings/saveSettings", () => {
   it("exposes stored commands with every field filled", async () => {
     store.commands = [
-      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3", pinned: true },
-      { id: "b", action: "tvOff" },
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", hotkey: "Command+Control+3", pinned: true, runOnWake: true },
+      { id: "b", action: "tvOff", sleepPc: true },
     ];
     const settings = await getSettings();
     expect(settings.commands).toEqual([
-      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", keySeq: "", hotkey: "Command+Control+3", pinned: true },
-      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", keySeq: "", hotkey: "", pinned: false },
+      { id: "a", action: "tvOnHdmi", deviceIds: ["tv1", "tv2"], hdmi: "HDMI3", keySeq: "", hotkey: "Command+Control+3", pinned: true, runOnWake: true, sleepPc: false },
+      { id: "b", action: "tvOff", deviceIds: [], hdmi: "", keySeq: "", hotkey: "", pinned: false, runOnWake: false, sleepPc: true },
     ]);
   });
 
@@ -204,7 +193,7 @@ describe("LAN device fields", () => {
       deviceConfigs: {
         "local:tv": {
           alias: "", description: "", host: "1.2.3.4", mac: "", inputKeySeq: "",
-          keyDelay: "2.5", paired: false, autoWake: true,
+          keyDelay: "2.5", paired: false,
         },
       },
     });
@@ -216,7 +205,7 @@ describe("LAN device fields", () => {
       deviceConfigs: {
         "local:tv": {
           alias: "", description: "", host: "1.2.3.4", mac: "", inputKeySeq: "",
-          keyDelay: "7", paired: false, autoWake: true,
+          keyDelay: "7", paired: false,
         },
       },
     });
@@ -225,7 +214,7 @@ describe("LAN device fields", () => {
       deviceConfigs: {
         "local:tv": {
           alias: "", description: "", host: "1.2.3.4", mac: "", inputKeySeq: "",
-          keyDelay: "", paired: false, autoWake: true,
+          keyDelay: "", paired: false,
         },
       },
     });

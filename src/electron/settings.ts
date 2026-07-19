@@ -56,6 +56,12 @@ export interface CommandSettings {
   // When true, the command is shown as a button on the Main screen. Always present (defaults to
   // false) so the eye toggle is a controlled input.
   pinned: boolean;
+  // When true, the command runs automatically after the PC wakes (and at boot). Always present
+  // (defaults to false) so the sunrise toggle is a controlled input.
+  runOnWake: boolean;
+  // When true, this PC is put to sleep after the command's action runs. Always present (defaults
+  // to false) so the moon toggle is a controlled input.
+  sleepPc: boolean;
 }
 
 export interface DeviceConfigSettings {
@@ -72,9 +78,6 @@ export interface DeviceConfigSettings {
   // Read-only in the UI: true once a LAN pairing token is stored. The token itself is never sent
   // to the renderer (a secret) — only this flag.
   paired: boolean;
-  // Whether the daemon's automatic power-on (PC resume / boot) acts on this TV. Default true;
-  // only the opt-out (`false`) is persisted.
-  autoWake: boolean;
 }
 
 export async function getSettings(): Promise<AppSettings> {
@@ -98,7 +101,6 @@ export async function getSettings(): Promise<AppSettings> {
           keyDelay: cfg.keyDelay != null ? String(cfg.keyDelay) : "",
           // Expose only whether a pairing token exists — never the token itself.
           paired: Boolean(cfg.wsToken),
-          autoWake: cfg.autoWake !== false,
         },
       ]),
     ),
@@ -114,6 +116,8 @@ export async function getSettings(): Promise<AppSettings> {
       keySeq: commandIsKeySeq(cmd) ? (cmd.keySeq ?? "") : "",
       hotkey: cmd.hotkey ?? "",
       pinned: cmd.pinned ?? false,
+      runOnWake: cmd.runOnWake ?? false,
+      sleepPc: cmd.sleepPc ?? false,
     })),
   };
 }
@@ -152,9 +156,10 @@ function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
   // replacing is what lets clearing all of a TV's fields delete its entry (the sanitizer prunes
   // all-empty entries). A malformed payload normalizes to only its valid entries.
   //
-  // The renderer never sees wsToken (it's a secret set by the pairing IPC) and no longer edits
-  // pcInput (the stored per-TV input the automatic wake still switches to), so a naive replace
-  // would wipe both. Carry each forward from the stored config by deviceId before normalizing.
+  // The renderer never sees wsToken (it's a secret set by the pairing IPC), and no longer edits
+  // pcInput (the stored per-TV input) or autoWake (the retired auto-wake opt-out, kept in the
+  // schema for back-compat), so a naive replace would wipe them. Carry each forward from the stored
+  // config by deviceId before normalizing.
   if (typeof partial.deviceConfigs === "object" && partial.deviceConfigs !== null) {
     const stored = config.deviceConfigs ?? {};
     const merged: Record<string, unknown> = {};
@@ -164,6 +169,7 @@ function applySettings(config: TVConfig, partial: Partial<AppSettings>): void {
         ...cfg,
         ...(kept?.pcInput ? { pcInput: kept.pcInput } : {}),
         ...(kept?.wsToken ? { wsToken: kept.wsToken } : {}),
+        ...(kept?.autoWake === false ? { autoWake: false } : {}),
       };
     }
     config.deviceConfigs = normalizeDeviceConfigs(merged);

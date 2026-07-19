@@ -199,15 +199,15 @@ export function canonicalizeMac(value: string): string {
 
 // User-defined commands
 
-// What a command does when run. The HDMI-switching actions carry which input to switch to;
-// "tvOffSleepPc" also puts this computer to sleep after the TV is off.
-export type CommandAction = "tvOn" | "tvOff" | "tvOnHdmi" | "tvOffSleepPc" | "switchHdmi";
+// What a command does when run. The HDMI-switching actions carry which input to switch to.
+// Putting this PC to sleep is no longer an action of its own — it's the separate `sleepPc` flag,
+// applied after whatever action the command runs.
+export type CommandAction = "tvOn" | "tvOff" | "tvOnHdmi" | "switchHdmi";
 
 export const COMMAND_ACTIONS: readonly CommandAction[] = [
   "tvOn",
   "tvOff",
   "tvOnHdmi",
-  "tvOffSleepPc",
   "switchHdmi",
 ];
 
@@ -242,6 +242,14 @@ export interface CommandConfig {
   // When true, this command is surfaced as a button on the Main screen (which shows only pinned
   // commands). Unset/false = it lives only in the Settings list. Toggled by the eye icon.
   pinned?: boolean;
+  // When true, this command runs automatically after the PC wakes from sleep (and at boot). This
+  // is the sole driver of the automatic wake behavior — nothing runs on resume unless at least one
+  // command opts in here. Unset/false = never run automatically. Toggled by the sunrise icon.
+  runOnWake?: boolean;
+  // When true, this PC is put to sleep after the command's action runs (regardless of whether it
+  // succeeded). Replaces the old "TV off + sleep PC" action, so it can pair with any action.
+  // Unset/false = leave this PC alone. Toggled by the moon icon.
+  sleepPc?: boolean;
 }
 
 // True when the action switches inputs, so a command needs its HDMI selection.
@@ -270,8 +278,6 @@ export function commandLabel(cmd: CommandConfig): string {
       return "TV off";
     case "tvOnHdmi":
       return `TV on → ${cmd.hdmi ?? "HDMI?"}`;
-    case "tvOffSleepPc":
-      return "TV off + sleep PC";
     case "switchHdmi":
       return `Switch to ${cmd.hdmi ?? "HDMI?"}`;
   }
@@ -287,7 +293,10 @@ export function normalizeCommands(value: unknown): CommandConfig[] {
   for (const raw of value) {
     if (typeof raw !== "object" || raw === null) continue;
     const entry = raw as Record<string, unknown>;
-    const action = entry.action;
+    // Back-compat: the retired "TV off + sleep PC" action becomes "TV off" plus the separate
+    // sleep-PC flag, so a stored one (and its hotkey/pin/target) survives the migration.
+    const legacySleepPc = entry.action === "tvOffSleepPc";
+    const action = legacySleepPc ? "tvOff" : entry.action;
     if (!COMMAND_ACTIONS.includes(action as CommandAction)) continue;
     const cmd: CommandConfig = {
       id:
@@ -326,6 +335,8 @@ export function normalizeCommands(value: unknown): CommandConfig[] {
     }
     if (typeof entry.hotkey === "string" && entry.hotkey.trim()) cmd.hotkey = entry.hotkey.trim();
     if (entry.pinned === true) cmd.pinned = true;
+    if (entry.runOnWake === true) cmd.runOnWake = true;
+    if (legacySleepPc || entry.sleepPc === true) cmd.sleepPc = true;
     result.push(cmd);
   }
   return result;

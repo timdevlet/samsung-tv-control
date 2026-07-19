@@ -20,10 +20,17 @@ function commandIsKeySeq(cmd: CommandSettings): boolean {
 // Human label for a command's Main-screen button. Mirrors commandLabel in src/domain/config.ts —
 // duplicated for the same sandbox reason (same as CommandList's usesHdmi).
 function commandLabel(cmd: CommandSettings): string {
-  if (commandIsKeySeq(cmd)) {
-    const seq = cmd.keySeq.trim();
-    return seq ? `Keys: ${seq}` : "Key sequence";
-  }
+  return commandIsKeySeq(cmd)
+    ? keySeqLabel(cmd)
+    : actionLabel(cmd) + (cmd.sleepPc ? " + sleep PC" : "");
+}
+
+function keySeqLabel(cmd: CommandSettings): string {
+  const seq = cmd.keySeq.trim();
+  return seq ? `Keys: ${seq}` : "Key sequence";
+}
+
+function actionLabel(cmd: CommandSettings): string {
   switch (cmd.action) {
     case "tvOn":
       return "TV on";
@@ -31,16 +38,16 @@ function commandLabel(cmd: CommandSettings): string {
       return "TV off";
     case "tvOnHdmi":
       return `TV on → ${cmd.hdmi || "HDMI?"}`;
-    case "tvOffSleepPc":
-      return "TV off + sleep PC";
     case "switchHdmi":
       return `Switch to ${cmd.hdmi || "HDMI?"}`;
   }
 }
 
-// The button's big icon, by what the command does: key sequence → remote, on → power,
-// off → slashed power, off+sleep → moon, HDMI switch → plug.
+// The button's big icon, by what the command does: a command that sleeps this PC afterward → moon
+// (it's the headline effect); otherwise key sequence → remote, on → power, off → slashed power,
+// HDMI switch → plug.
 function commandIcon(cmd: CommandSettings) {
+  if (cmd.sleepPc) return <MoonIcon size={40} />;
   if (commandIsKeySeq(cmd)) return <KeysIcon size={40} />;
   switch (cmd.action) {
     case "tvOn":
@@ -48,8 +55,6 @@ function commandIcon(cmd: CommandSettings) {
       return <PowerIcon size={40} />;
     case "tvOff":
       return <PowerOffIcon size={40} />;
-    case "tvOffSleepPc":
-      return <MoonIcon size={40} />;
     case "switchHdmi":
       return <HdmiIcon size={40} />;
   }
@@ -65,7 +70,6 @@ function commandHoverClass(cmd: CommandSettings): string {
     case "tvOnHdmi":
       return "on";
     case "tvOff":
-    case "tvOffSleepPc":
       return "off";
     case "switchHdmi":
       return "input";

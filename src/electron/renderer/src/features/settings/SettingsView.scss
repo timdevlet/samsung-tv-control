@@ -7,8 +7,10 @@
   background: var(--bg);
   border: none;
   border-radius: 0;
-  /* Top padding clears the fixed glass header while the content still scrolls under it. */
-  padding: calc(var(--header-height) + 16px) 20px 16px 0px;
+  /* Top padding clears the fixed glass header while the content still scrolls under it. A small
+     left padding keeps the content off the window edge (the wider right value leaves room for the
+     scrollbar). */
+  padding: calc(var(--header-height) + 16px) 20px 16px 20px;
  
   p.hint {
     margin: 0 0 16px;
@@ -20,7 +22,7 @@
 /* Keep form rows readable on a wide window while the page itself fills 100%.
    (.modal-inner because OverlayScrollbars owns .modal's direct children.) */
 .modal-inner > * {
-  max-width: 840px;
+  max-width: 1040px;
   margin-left: auto;
   margin-right: auto;
 }
