@@ -77,11 +77,13 @@ export function MultiSelectList({
           <span className="multiselect-label">(Select all)</span>
         </label>
       )}
-      <div className="multiselect-divider" role="separator" />
+      <div className="multiselect-divider" aria-hidden="true" />
       {options.map((o) => {
         const id = `${allId}-${o.value}`;
         const checked = selected.has(o.value);
+        // Not an iterated element — it's nested inside the keyed <label> returned below.
         const text = (
+          // biome-ignore lint/correctness/useJsxKeyInIterable: nested in a keyed <label>, see below.
           <span className="multiselect-text">
             <span className="multiselect-label">{o.label}</span>
             {o.subtitle != null && o.subtitle !== "" && (

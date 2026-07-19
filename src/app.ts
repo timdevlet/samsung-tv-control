@@ -190,7 +190,7 @@ export function createApp(): App {
   // hotkeys target specific TVs regardless of what's selected).
   async function forEachSelected(
     config: TVConfig,
-    transport: TVTransport,
+    _transport: TVTransport,
     op: (deviceId: string) => Promise<void>,
     idsOverride?: string[],
   ): Promise<boolean> {
@@ -278,7 +278,7 @@ export function createApp(): App {
     }
 
     log("\n1) Open this URL in your browser (logged into your Samsung account) and approve:\n");
-    log("   " + authorizeUrl(config) + "\n");
+    log(`   ${authorizeUrl(config)}\n`);
     log(
       `2) You'll be redirected to ${config.redirectUri ?? DEFAULT_REDIRECT_URI} with ?code=... in the URL.`,
     );

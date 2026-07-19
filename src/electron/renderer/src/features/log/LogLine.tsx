@@ -17,6 +17,9 @@ export const LogLine = memo(function LogLine({ entry }: { entry: LogEntry }) {
         token.kind === "text" ? (
           token.text
         ) : (
+          // Tokens are a stable, append-only parse of one log line — never reordered, so the
+          // index is a safe key.
+          // biome-ignore lint/suspicious/noArrayIndexKey: stable, non-reordered token list.
           <span key={i} className={token.kind}>
             {token.text}
           </span>

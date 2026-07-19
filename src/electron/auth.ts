@@ -73,7 +73,9 @@ export const LOGIN_CANCELLED = Symbol("login-cancelled");
 // The client (clientId/clientSecret/redirectUri) must already be saved via Settings; resolves once
 // tokens are saved (or with LOGIN_CANCELLED if the user closed the window); rejects if the client
 // is missing, on denial, or on timeout.
-export async function login(parent: BrowserWindow | null): Promise<void | typeof LOGIN_CANCELLED> {
+export async function login(
+  parent: BrowserWindow | null,
+): Promise<undefined | typeof LOGIN_CANCELLED> {
   // Mock mode: succeed instantly instead of opening the real SmartThings approval window (there
   // is no OAuth client configured, and the fake cloud has no auth server anyway).
   if (isMockMode()) {

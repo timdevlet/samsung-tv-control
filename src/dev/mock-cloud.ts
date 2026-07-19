@@ -182,7 +182,7 @@ export function installMockCloud(): void {
         },
       },
     };
-    writeFileSync(configPath, JSON.stringify(seed, null, 2) + "\n", "utf8");
+    writeFileSync(configPath, `${JSON.stringify(seed, null, 2)}\n`, "utf8");
   }
 
   const realFetch = globalThis.fetch;

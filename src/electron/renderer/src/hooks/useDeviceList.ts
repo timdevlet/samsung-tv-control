@@ -37,6 +37,7 @@ export function useDeviceList(): { state: DeviceListState; reload: () => void } 
     return () => {
       alive = false;
     };
+    // generation is the refetch trigger: reload() bumps it to re-run this effect.
   }, [generation]);
 
   const reload = useCallback(() => setGeneration((g) => g + 1), []);

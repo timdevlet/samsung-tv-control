@@ -186,7 +186,11 @@ export function SettingsView({
     seenTvIds.add(id);
     knownTvIds.push(id);
   };
-  if (devices.kind === "ready") devices.devices.forEach((d) => addTvId(d.deviceId));
+  if (devices.kind === "ready") {
+    devices.devices.forEach((d) => {
+      addTvId(d.deviceId);
+    });
+  }
   Object.entries(form.draft.deviceConfigs).forEach(([id, cfg]) => {
     if (cfg.host?.trim()) addTvId(id);
   });
@@ -217,7 +221,6 @@ export function SettingsView({
     const first = [...form.draft.selectedDeviceIds].find((id) => knownTvIds.includes(id));
     if (first) setSelectedTvId(first);
     // knownTvIds/draft are recomputed each render; the ref guard makes this run once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devices.kind]);
   // A device can disappear between list loads — never leave the panel stranded on a gone TV.
   const activeTvId = selectedTvId && knownTvIds.includes(selectedTvId) ? selectedTvId : null;

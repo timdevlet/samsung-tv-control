@@ -64,12 +64,12 @@ export interface RawStatus {
 export function parseStatus(data: RawStatus): TVStatus {
   const main = data.components?.main ?? {};
 
-  const power = main["switch"]?.["switch"]?.value as string | undefined;
+  const power = main.switch?.switch?.value as string | undefined;
 
   const inputCapability = INPUT_CAPABILITIES.find((c) => main[c] != null);
   const cap = inputCapability ? main[inputCapability] : undefined;
 
-  const rawMap = (cap?.["supportedInputSourcesMap"]?.value ?? []) as {
+  const rawMap = (cap?.supportedInputSourcesMap?.value ?? []) as {
     id: string;
     name?: string;
   }[];
@@ -77,7 +77,7 @@ export function parseStatus(data: RawStatus): TVStatus {
     id: String(s.id),
     name: String(s.name ?? s.id),
   }));
-  const currentInput = cap?.["inputSource"]?.value as string | undefined;
+  const currentInput = cap?.inputSource?.value as string | undefined;
 
   return { power, inputCapability, currentInput, sources };
 }

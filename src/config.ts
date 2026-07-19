@@ -39,7 +39,7 @@ export async function loadConfig(): Promise<TVConfig> {
 }
 
 export async function saveConfig(config: TVConfig): Promise<void> {
-  await writeFile(configPath(), JSON.stringify(config, null, 2) + "\n", "utf8");
+  await writeFile(configPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
 // All config mutations go through here. Several writers run concurrently in the Electron app —
@@ -50,7 +50,12 @@ export async function saveConfig(config: TVConfig): Promise<void> {
 // promise chain makes each read-modify-write atomic relative to the others.
 let writeLock: Promise<unknown> = Promise.resolve();
 
-export function updateConfig(mutate: (config: TVConfig) => TVConfig | void): Promise<TVConfig> {
+export function updateConfig(
+  // `| void` lets a mutate callback either return a new config or mutate in place and return
+  // nothing; `| undefined` would reject void-returning callers, so this stays void deliberately.
+  // biome-ignore lint/suspicious/noConfusingVoidType: intentional — see above.
+  mutate: (config: TVConfig) => TVConfig | void,
+): Promise<TVConfig> {
   const run = writeLock.then(async () => {
     const config = await loadConfig();
     const next = mutate(config) ?? config;

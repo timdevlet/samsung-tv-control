@@ -44,7 +44,11 @@ export function TvControlList({
     seen.add(id);
     ids.push(id);
   };
-  if (devices.kind === "ready") devices.devices.forEach((d) => addId(d.deviceId));
+  if (devices.kind === "ready") {
+    devices.devices.forEach((d) => {
+      addId(d.deviceId);
+    });
+  }
   for (const [id, cfg] of Object.entries(deviceConfigs)) {
     if (cfg.host?.trim()) addId(id);
   }

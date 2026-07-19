@@ -81,7 +81,7 @@ export async function discoverTVs(timeoutMs = 3000): Promise<DiscoveredTV[]> {
       if (!found.has(rinfo.address)) {
         found.set(rinfo.address, {
           host: rinfo.address,
-          name: headers["friendlyname"] || undefined,
+          name: headers.friendlyname || undefined,
         });
       }
     });

@@ -23,6 +23,7 @@ export function useAutoScroll(itemCount: number, enabled: boolean) {
     if (el && enabledRef.current && nearBottomRef.current) el.scrollTop = el.scrollHeight;
     // The assignment fires a scroll event, which re-syncs nearBottomRef to "at bottom".
   };
+  // itemCount is the dep on purpose: re-sync to the bottom each time new lines land.
   useLayoutEffect(syncToBottom, [itemCount]);
 
   return {

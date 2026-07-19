@@ -35,5 +35,5 @@ if (pkg.version === version) {
 
 const old = pkg.version;
 pkg.version = version;
-await writeFile(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
+await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 console.log(`sync-version: ${old} -> ${version} (from tag ${tag}).`);

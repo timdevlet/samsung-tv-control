@@ -127,6 +127,8 @@ export function useSettingsForm(
   // must reach disk for login to see them) and fired on unmount (Close inside the debounce
   // window). `pending` is a ref, so the first-render closure below always sees the latest save.
   const flush = (): Promise<void> => pending.current?.() ?? Promise.resolve();
+  // Mount/unmount only: flush the pending save on unmount. flush reads a ref, so the first-render
+  // closure always sees the latest save — adding it as a dep would re-run this every render.
   useEffect(() => () => void flush(), []);
 
   return {

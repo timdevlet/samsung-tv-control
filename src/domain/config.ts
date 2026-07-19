@@ -193,6 +193,7 @@ export function normalizeTheme(value: unknown): ThemePreference {
 export function canonicalizeMac(value: string): string {
   const hex = value.replace(/[^0-9a-fA-F]/g, "").toLowerCase();
   if (hex.length !== 12) return "";
+  // Safe: length === 12 is guaranteed above, so this match never returns null.
   return hex.match(/.{2}/g)!.join(":");
 }
 

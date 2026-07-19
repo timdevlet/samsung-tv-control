@@ -23,7 +23,7 @@ interface TokenError {
 
 function basicAuth(config: TVConfig): string {
   // Credentials go in the HTTP Basic auth header, never in the body.
-  return "Basic " + Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64");
+  return `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString("base64")}`;
 }
 
 async function postToken(config: TVConfig, params: Record<string, string>): Promise<TokenResponse> {

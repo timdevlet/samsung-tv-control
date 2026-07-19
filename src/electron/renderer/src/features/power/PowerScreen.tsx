@@ -10,6 +10,10 @@ import "./PowerScreen.scss";
 // renderer keeps importing only types from the node-side modules.
 function commandIsKeySeq(cmd: CommandSettings): boolean {
   const target = cmd.deviceIds[0];
+  // target can be undefined at runtime when deviceIds is empty (index access isn't checked);
+  // the null guard keeps this returning a real boolean rather than undefined — optional chaining
+  // would yield `boolean | undefined`, which the declared `: boolean` return type shouldn't be.
+  // biome-ignore lint/complexity/useOptionalChain: explicit null guard is intentional, see above.
   return target != null && target.startsWith("local:");
 }
 

@@ -77,6 +77,8 @@ export interface Daemon {
 
 // Build and start the daemon. Returns the live actions + a stop() teardown.
 export async function startDaemon(): Promise<Daemon> {
+  // useTimestamps is a logging helper, not a React hook — the rule matches on the `use` prefix.
+  // biome-ignore lint/correctness/useHookAtTopLevel: not a React hook.
   useTimestamps();
   const app = createApp();
   const gate = new TriggerGate(COOLDOWN_MS);
@@ -232,6 +234,7 @@ export async function startDaemon(): Promise<Daemon> {
     // is a `local:` TV). Split the stored sequence into tokens; triggerSendKeys normalizes them to
     // KEY_* and gate-guards the send.
     if (commandIsKeySeq(cmd)) {
+      // commandIsKeySeq guarantees a local: target in deviceIds[0].
       const deviceId = cmd.deviceIds![0];
       const tokens = (cmd.keySeq ?? "")
         .split(",")
