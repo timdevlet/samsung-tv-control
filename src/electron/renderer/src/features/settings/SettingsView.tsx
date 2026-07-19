@@ -494,7 +494,8 @@ export function SettingsView({
             Your own commands: pick the TV it targets. A cloud TV runs an action (and an HDMI input
             for the switch actions); a LAN TV runs a key sequence you type instead. Optionally bind
             a hotkey, then run it with ▶. Toggle the sunrise to run it automatically when this PC
-            wakes up, or the eye to add it as a button on the Main screen.
+            wakes up, the eye to add it as a button on the Main screen, or the moon to sleep this PC
+            after it runs.
           </p>
           <CommandList
             commands={form.draft.commands}

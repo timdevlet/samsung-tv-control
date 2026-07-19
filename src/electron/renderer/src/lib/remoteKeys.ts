@@ -27,7 +27,10 @@ export const REMOTE_KEY_GROUPS: readonly GroupSelectGroup[] = [
   },
   {
     label: "Power",
-    options: [{ value: "POWER", label: "Power" }],
+    options: [
+      { value: "PowerOFF", label: "OFF" }, 
+      { value: "PowerON", label: "ON" }
+    ],
   },
   {
     label: "Volume",
