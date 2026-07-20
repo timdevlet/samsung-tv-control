@@ -17,6 +17,10 @@ export interface InputSource {
   name: string;
 }
 
+// Coarse power state for the Settings list's live status pills: "on"/"off" when a probe answered,
+// "unknown" when it couldn't be determined (TV offline, or a cloud TV while signed out).
+export type DevicePower = "on" | "off" | "unknown";
+
 export interface TVStatus {
   // "on" | "off" | undefined
   power?: string;

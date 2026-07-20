@@ -38,6 +38,13 @@
       min-width: 0;
     }
 
+    /* Live power pill, pushed to the row's trailing edge by the flex-1 text block. Doesn't shrink,
+       so a long TV name never squeezes the "On"/"Off" label. */
+    .status {
+      flex: none;
+      margin-right: 0;
+    }
+
     .tv-row-label {
       display: flex;
       align-items: center;

@@ -5,7 +5,7 @@
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from "electron";
 import type { CommandConfig } from "../domain/config.js";
 import type { ActionResult } from "../domain/daemon.js";
-import type { STDevice } from "../domain/tv.js";
+import type { DevicePower, STDevice } from "../domain/tv.js";
 import type { LogEntry } from "../log.js";
 import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
@@ -14,6 +14,9 @@ type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolea
 type DeviceListResult =
   | { ok: true; devices: STDevice[] }
   | { ok: false; error: string; notAuthorized?: boolean };
+type DeviceStatusResult =
+  | { ok: true; statuses: Record<string, DevicePower> }
+  | { ok: false; error: string };
 type DiscoveredTV = { host: string; name?: string; mac?: string };
 type DiscoverResult = { ok: true; candidates: DiscoveredTV[] } | { ok: false; error: string };
 type PairResult = { ok: true; deviceId: string } | { ok: false; error?: string };
@@ -46,6 +49,10 @@ const tvAPI = {
     ipcRenderer.invoke("settings:save", partial),
   // The account's TVs, for the Settings device-selection list.
   listTVs: (): Promise<DeviceListResult> => ipcRenderer.invoke("devices:list"),
+  // Live power of the given TVs, for the Settings list's status pills. Batched in one round-trip;
+  // an unreachable TV resolves to "unknown" rather than failing the call.
+  getStatuses: (deviceIds: string[]): Promise<DeviceStatusResult> =>
+    ipcRenderer.invoke("devices:status", deviceIds),
   // Local transport: find Samsung TVs on the LAN, and pair with one (pops the on-screen Allow
   // and stores the returned token).
   discoverTVs: (): Promise<DiscoverResult> => ipcRenderer.invoke("tv:discover"),

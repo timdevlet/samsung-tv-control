@@ -19,7 +19,7 @@ import { loadConfig, resolveToken, type TVConfig } from "./config.js";
 import { isMockMode } from "./dev/mock-cloud.js";
 import { makeMockTransport } from "./dev/mock-transport.js";
 import { autoWakeEnabled } from "./domain/config.js";
-import type { STDevice, TVStatus } from "./domain/tv.js";
+import type { DevicePower, STDevice, TVStatus } from "./domain/tv.js";
 import { isOnInput, isTV, pickInput } from "./domain/tv.js";
 import { log, logError } from "./log.js";
 
@@ -128,6 +128,9 @@ export interface App {
   listDevices(): Promise<void>;
   // The TVs on the account (for the Settings selection UI).
   listTVs(): Promise<STDevice[]>;
+  // Coarse current power of each given TV, for the Settings list's live status pills. Best-effort
+  // per device: a TV that can't be probed (offline, or cloud while signed out) maps to "unknown".
+  deviceStatuses(deviceIds: string[]): Promise<Record<string, DevicePower>>;
 }
 
 export function createApp(): App {
@@ -553,6 +556,26 @@ export function createApp(): App {
     return (await transport.listDevices()).filter(isTV);
   }
 
+  // Probe the current power of each given TV for the Settings list's status pills. Builds the
+  // transport once (not per device) so N TVs cost one config load + token resolution, then probes
+  // all in parallel. Each probe is independent and best-effort: an offline TV or a cloud TV while
+  // signed out rejects, which we map to "unknown" so one dead TV never fails the whole batch.
+  async function deviceStatuses(deviceIds: string[]): Promise<Record<string, DevicePower>> {
+    const config = await loadConfig();
+    const transport = await buildTransport(config);
+    const entries = await Promise.all(
+      deviceIds.map(async (deviceId): Promise<[string, DevicePower]> => {
+        try {
+          const { power } = await transport.getStatus(deviceId);
+          return [deviceId, power === "on" ? "on" : power === "off" ? "off" : "unknown"];
+        } catch {
+          return [deviceId, "unknown"];
+        }
+      }),
+    );
+    return Object.fromEntries(entries);
+  }
+
   // `switch` is a JS reserved word, so the internal fn is `switchInput`, exposed as `switch`.
   return {
     login,
@@ -563,5 +586,6 @@ export function createApp(): App {
     sendKeys,
     listDevices,
     listTVs,
+    deviceStatuses,
   };
 }

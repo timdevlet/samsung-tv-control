@@ -1,8 +1,18 @@
 import { MutedMessage } from "../../components/MutedMessage";
+import { StatusPill } from "../../components/StatusPill";
 import type { DeviceListState } from "../../hooks/useDeviceList";
-import type { DeviceConfigSettings, STDevice } from "../../types";
+import { useDeviceStatuses } from "../../hooks/useDeviceStatuses";
+import type { DeviceConfigSettings, DevicePower, STDevice } from "../../types";
 import { type DeviceOptionInput, deviceMultiSelectOptions } from "./deviceOptions";
 import "./TvControlList.scss";
+
+// Map a probed power to the StatusPill's visual state + label. A TV not yet in the map (probe
+// pending) reads as "unknown" → a muted "Checking…" dot.
+const POWER_PILL: Record<DevicePower, { state: "ok" | "off" | "unknown"; text: string }> = {
+  on: { state: "ok", text: "On" },
+  off: { state: "off", text: "Off" },
+  unknown: { state: "unknown", text: "Checking…" },
+};
 
 // The single-select TV list that replaced the old segmented tab bar. Each row is one TV; clicking
 // it selects that ONE TV (the parent then edits it and makes it what commands act on). A trailing
@@ -65,6 +75,10 @@ export function TvControlList({
   });
   const options = deviceMultiSelectOptions(optionInputs, deviceConfigs);
 
+  // Live power for each listed TV, shown as a trailing pill (mirrors the header's auth pill). The
+  // batched probe re-runs whenever the id set changes; an id still being probed reads "unknown".
+  const { statuses } = useDeviceStatuses(ids);
+
   // A message state (loading / signed out) with no LAN-paired TVs to show: surface it, but still
   // offer the Add row below so a local-only user can start pairing.
   const showMessage = options.length === 0 && devices.kind !== "ready";
@@ -78,6 +92,7 @@ export function TvControlList({
       )}
       {options.map((o) => {
         const active = !adding && o.value === selectedId;
+        const pill = POWER_PILL[statuses[o.value] ?? "unknown"];
         return (
           <button
             key={o.value}
@@ -93,6 +108,7 @@ export function TvControlList({
                 <small className="tv-row-subtitle">{o.subtitle}</small>
               )}
             </span>
+            <StatusPill state={pill.state}>{pill.text}</StatusPill>
           </button>
         );
       })}

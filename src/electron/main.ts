@@ -320,6 +320,22 @@ async function start(): Promise<void> {
     }
   });
 
+  // Live power of the requested TVs, for the Settings list's status pills. Batched into one call
+  // (one createApp/config/token resolution for all ids) rather than one probe per TV. Best-effort:
+  // an unreachable TV comes back "unknown" inside a still-ok result; only a total failure returns
+  // { ok: false }.
+  ipcMain.handle("devices:status", async (_e, deviceIds: unknown) => {
+    const ids = Array.isArray(deviceIds)
+      ? (deviceIds.filter((x) => typeof x === "string") as string[])
+      : [];
+    try {
+      const statuses = await createApp().deviceStatuses(ids);
+      return { ok: true as const, statuses };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   // Local transport: discover Samsung TVs on the LAN so Settings can pre-fill a host/MAC.
   ipcMain.handle("tv:discover", async () => {
     if (mockMode) {
@@ -351,6 +367,9 @@ async function start(): Promise<void> {
     const host = args?.host?.trim();
     const mac = args?.mac?.trim() ?? "";
     if (!host) return { ok: false as const, error: "Enter the TV's IP address first." };
+    // Log the attempt/outcome so the log window shows what happened — pairing is otherwise silent
+    // (the on-screen "Allow" is the only feedback, and it never appears when the connect fails).
+    log(`Pairing with TV at "${host}" — turn the TV on and accept the “Allow” prompt on screen…`);
     try {
       const token = mockMode ? "mock-ws-token" : await pairWithTV(host);
       // Write the token onto the same entry the per-TV fields are edited against — the active
@@ -367,9 +386,12 @@ async function start(): Promise<void> {
         selected.add(deviceId);
         config.selectedDeviceIds = [...selected];
       });
+      log(`✅ Paired with TV at "${host}".`);
       return { ok: true as const, deviceId };
     } catch (err) {
-      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+      const message = err instanceof Error ? err.message : String(err);
+      logError(`Pairing with TV at "${host}" failed: ${message}`);
+      return { ok: false as const, error: message };
     }
   });
 

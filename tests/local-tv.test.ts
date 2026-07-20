@@ -204,7 +204,7 @@ describe("LocalTV", () => {
     },
   };
 
-  it("powerOff sends KEY_POWER over an authorized WS", async () => {
+  it("powerOff sends the KEY_POWER toggle over an authorized WS", async () => {
     const ws = new FakeWS();
     const factory = (url: string) => {
       expect(url).toContain("token=stored-token");

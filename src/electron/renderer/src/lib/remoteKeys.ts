@@ -1,9 +1,13 @@
 import type { GroupSelectGroup } from "../components/GroupSelect";
 
 // Popular Samsung Tizen remote keys, grouped for the key-sequence picker. Values are the bare
-// friendly tokens the sequence field uses ("UP", "HDMI2"); normalizeRemoteKey on the node side
-// (src/api/local-tv.ts) turns each into its KEY_* id at send time. No "PC" entry — the bare token
-// is aliased to KEY_HDMI2 there rather than becoming KEY_PC, which would surprise here.
+// friendly tokens the sequence field uses ("UP", "SOURCE"); normalizeRemoteKey on the node side
+// (src/api/local-tv.ts) turns each into its KEY_* id at send time.
+//
+// No direct "HDMI2"/"PC" jump key: on newer Tizen models the discrete KEY_HDMI1..4 keys are no-ops
+// over the remote WebSocket, so a single-key preset can't reliably land on the PC input. The
+// working path is "Source" (opens the input panel) + Navigation arrows + Enter, recorded as a key
+// sequence tuned to that TV's source-list layout — which is exactly what this grouped picker builds.
 export const REMOTE_KEY_GROUPS: readonly GroupSelectGroup[] = [
   {
     label: "Navigation",
@@ -28,8 +32,9 @@ export const REMOTE_KEY_GROUPS: readonly GroupSelectGroup[] = [
   {
     label: "Power",
     options: [
-      { value: "PowerOFF", label: "OFF" }, 
-      { value: "PowerON", label: "ON" }
+      { value: "Power", label: "Power" },
+      { value: "PowerOFF", label: "OFF if ON" },
+      { value: "PowerON", label: "ON if OFF" },
     ],
   },
   {

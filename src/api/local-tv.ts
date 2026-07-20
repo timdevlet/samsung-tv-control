@@ -358,6 +358,11 @@ export class LocalTV implements TVTransport {
   }
 
   async powerOff(deviceId: string): Promise<void> {
+    // KEY_POWER is the power *toggle* — the one key Samsung Tizen models honor universally over the
+    // remote WebSocket (the discrete KEY_POWEROFF is a no-op on newer sets, same as the direct
+    // KEY_HDMI<n> keys). The toggle's only hazard — flipping an already-off TV back on — can't
+    // happen here: app.ts's offOne() probes power first and only calls powerOff() when it read the
+    // TV as on (an off TV → it does nothing). So the reliable toggle is safe.
     await this.sendKeys(deviceId, ["KEY_POWER"]);
   }
 
