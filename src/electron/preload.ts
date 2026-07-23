@@ -11,11 +11,11 @@ import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
 
 type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
-// Exported for the renderer's device-list store (type-only import — erased at build time).
+// Exported for the renderer's stores (type-only imports — erased at build time).
 export type DeviceListResult =
   | { ok: true; devices: STDevice[] }
   | { ok: false; error: string; notAuthorized?: boolean };
-type DeviceStatusResult =
+export type DeviceStatusResult =
   | { ok: true; statuses: Record<string, DevicePower> }
   | { ok: false; error: string };
 type DiscoveredTV = { host: string; name?: string; mac?: string };

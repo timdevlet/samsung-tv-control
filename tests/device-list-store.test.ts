@@ -3,7 +3,7 @@ import {
   createDeviceListStore,
   type DeviceListState,
   toDeviceListState,
-} from "../src/electron/renderer/src/lib/deviceListStore.js";
+} from "../src/electron/renderer/src/stores/deviceListStore.js";
 import type { STDevice } from "../src/domain/tv.js";
 
 const tv = (id: string): STDevice => ({

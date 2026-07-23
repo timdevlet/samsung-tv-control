@@ -14,6 +14,7 @@ import { TextInput } from "../../components/TextInput";
 import { useDeviceList } from "../../hooks/useDeviceList";
 import { useSettingsForm } from "../../hooks/useSettingsForm";
 import type { ToastKind } from "../../lib/toasts";
+import { api } from "../../stores/api";
 import type { AppSettings, AuthStatus } from "../../types";
 import { CommandList } from "./CommandList";
 import { OAuthClientFields } from "./OAuthClientFields";
@@ -134,7 +135,7 @@ export function SettingsView({
             .filter((d) => draft.selectedDeviceIds.has(d.deviceId))
             .map((d) => d.deviceId)
         : [...draft.selectedDeviceIds];
-    const res = await window.tvAPI.saveSettings({
+    const res = await api.saveSettings({
       // Cloud (Experimental) OAuth client — blank values are ignored by the main process so a saved
       // client can't be blanked by accident (see src/electron/settings.ts).
       clientId: draft.clientId.trim(),
@@ -244,7 +245,7 @@ export function SettingsView({
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
-    void window.tvAPI.getAppVersion().then(setAppVersion);
+    void api.getAppVersion().then(setAppVersion);
   }, []);
 
   // The deviceConfigs key the LAN fields currently edit: the selected TV, or the "__add__" scratch
@@ -257,7 +258,7 @@ export function SettingsView({
     if (!lanTargetId) return;
     setDiscovering(true);
     try {
-      const res = await window.tvAPI.discoverTVs();
+      const res = await api.discoverTVs();
       if (!res.ok) {
         form.setError(res.error || "Discovery failed.");
         return;
@@ -296,9 +297,7 @@ export function SettingsView({
     }
     setPairing(true);
     try {
-      const res = await window.tvAPI.pairTV(
-        isAdd ? { host, mac } : { deviceId: targetId, host, mac },
-      );
+      const res = await api.pairTV(isAdd ? { host, mac } : { deviceId: targetId, host, mac });
       if (!res.ok) {
         form.setError(res.error || "Pairing failed.");
         return;
@@ -337,7 +336,7 @@ export function SettingsView({
     // Freshly typed client fields may still be inside the autosave debounce — persist first so
     // authStatus/login see them.
     await form.flush();
-    const status = await window.tvAPI.authStatus();
+    const status = await onAuthChanged();
     if (!status.hasClient) {
       // The <details> must render open before its content is focusable.
       flushSync(() => setOauthOpen(true));
@@ -346,7 +345,7 @@ export function SettingsView({
     }
     setSigningIn(true);
     try {
-      const res = await window.tvAPI.login();
+      const res = await api.login();
       // Closing the OAuth popup (cancelled) is not a failure.
       if (!res.ok && !res.cancelled && res.error) form.setError(res.error);
       const next = await onAuthChanged();
@@ -360,7 +359,7 @@ export function SettingsView({
   // Sign out: clear stored tokens (the OAuth client is kept), refresh auth, and reload the list so
   // the cloud TVs drop out — the local TVs stay.
   const onSignOut = async () => {
-    await window.tvAPI.logout();
+    await api.logout();
     const next = await onAuthChanged();
     setIsAuthorized(next.authorized);
     reloadDevices();

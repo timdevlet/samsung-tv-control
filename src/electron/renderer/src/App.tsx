@@ -8,9 +8,11 @@ import { LogFooter } from "./features/log/LogFooter";
 import { LogView } from "./features/log/LogView";
 import { PowerScreen } from "./features/power/PowerScreen";
 import { SettingsView } from "./features/settings/SettingsView";
+import { useAuth } from "./hooks/useAuth";
 import { useLogs } from "./hooks/useLogs";
 import { useOpenSettingsEvent } from "./hooks/useOpenSettingsEvent";
 import { useToasts } from "./hooks/useToasts";
+import { api } from "./stores/api";
 import type { AppSettings } from "./types";
 import "./App.scss";
 
@@ -29,23 +31,21 @@ export default function App() {
   const [autoScroll, setAutoScroll] = useState(true);
   // The Settings tab body; null until loaded. Settings + cloud auth status are fetched before
   // mounting so the fields (and the Experimental group's signed-in/out state) are filled at first
-  // paint (a fresh mount per visit resets the device reload).
+  // paint (a fresh mount per visit resets the device reload). Auth lives in the shared auth store
+  // (stores/authStore) — refreshAuth after a sign-in/out or client change keeps every consumer in
+  // step and returns the latest to the caller.
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [authorized, setAuthorized] = useState(false);
+  const { status: authStatus, refresh: refreshAuth } = useAuth();
 
   const openSettings = useCallback(async () => {
     setView("settings"); // highlight the tab immediately; the body renders once loaded
     // Suspend the daemon's global hotkeys while Settings is open so a combo typed into a hotkey
     // capture field isn't swallowed by its own live registration (which blocks re-entering an
     // already-bound combo).
-    window.tvAPI.setHotkeysSuspended(true);
-    const [next, status] = await Promise.all([
-      window.tvAPI.getSettings(),
-      window.tvAPI.authStatus(),
-    ]);
-    setAuthorized(status.authorized);
+    api.setHotkeysSuspended(true);
+    const [next] = await Promise.all([api.getSettings(), refreshAuth()]);
     setSettings(next);
-  }, []);
+  }, [refreshAuth]);
 
   const onTabChange = useCallback(
     (next: View) => {
@@ -53,20 +53,12 @@ export default function App() {
         void openSettings();
         return;
       }
-      window.tvAPI.setHotkeysSuspended(false); // leaving Settings re-arms the hotkeys
+      api.setHotkeysSuspended(false); // leaving Settings re-arms the hotkeys
       setSettings(null); // so the next Settings visit gets a fresh mount with fresh data
       setView(next);
     },
     [openSettings],
   );
-
-  // Re-fetch cloud auth after a sign-in/out or client change; keeps App's copy in step with what
-  // the Settings tab reports and returns the latest to the caller.
-  const onAuthChanged = useCallback(async () => {
-    const status = await window.tvAPI.authStatus();
-    setAuthorized(status.authorized);
-    return status;
-  }, []);
 
   useOpenSettingsEvent(openSettings);
 
@@ -101,8 +93,8 @@ export default function App() {
       {view === "settings" && settings && (
         <SettingsView
           initialSettings={settings}
-          authorized={authorized}
-          onAuthChanged={onAuthChanged}
+          authorized={authStatus?.authorized ?? false}
+          onAuthChanged={refreshAuth}
           onToast={toasts.push}
         />
       )}

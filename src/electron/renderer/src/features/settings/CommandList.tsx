@@ -15,6 +15,7 @@ import { SelectMenu, type SelectMenuOption } from "../../components/SelectMenu";
 import { TextInput } from "../../components/TextInput";
 import { appendKeyToken, REMOTE_KEY_GROUPS } from "../../lib/remoteKeys";
 import type { ToastKind } from "../../lib/toasts";
+import { api } from "../../stores/api";
 import type { CommandAction, CommandSettings } from "../../types";
 import "./CommandList.scss";
 
@@ -95,7 +96,7 @@ export function CommandList({
   const run = async (cmd: CommandSettings) => {
     setRunningId(cmd.id);
     try {
-      const result = await window.tvAPI.runCommand(cmd);
+      const result = await api.runCommand(cmd);
       const target = cmd.deviceIds[0];
       const isKeySeq = target
         ? (choiceById.get(target)?.isLocal ?? target.startsWith("local:"))

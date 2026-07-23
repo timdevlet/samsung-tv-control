@@ -3,6 +3,7 @@ import { Button } from "../../components/Button";
 import { HdmiIcon, KeysIcon, MoonIcon, PowerIcon, PowerOffIcon } from "../../components/icons";
 import { useDeviceList } from "../../hooks/useDeviceList";
 import type { ToastKind } from "../../lib/toasts";
+import { api } from "../../stores/api";
 import type { AppSettings, CommandSettings } from "../../types";
 import "./PowerScreen.scss";
 
@@ -99,7 +100,7 @@ function useMainScreen(): { pinned: CommandSettings[]; tvNames: Map<string, stri
 
   useEffect(() => {
     let alive = true;
-    window.tvAPI.getSettings().then(
+    api.getSettings().then(
       (loaded) => {
         if (alive) setSettings(loaded);
       },
@@ -157,7 +158,7 @@ export function PowerScreen({
     const keySeq = commandIsKeySeq(cmd);
     if (!keySeq) setRunning((prev) => new Set(prev).add(cmd.id));
     try {
-      const result = await window.tvAPI.runCommand(cmd);
+      const result = await api.runCommand(cmd);
       if (result.ok) {
         if (!keySeq) onToast("success", `${commandLabel(cmd)} — done`);
       } else if (!result.busy) {

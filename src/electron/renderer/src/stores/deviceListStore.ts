@@ -5,10 +5,8 @@
 // loaded at least once. Framework-free (React binds via useSyncExternalStore in useDeviceList) so
 // it's unit-testable in the node vitest env like lib/toasts.ts.
 
-// Type-only import — the preload module itself must never be loaded here (its graph reaches
-// node: modules and `process`, which don't exist in the sandboxed renderer); erased at build.
-import type { DeviceListResult } from "../../../preload.js";
 import type { STDevice } from "../types";
+import { api, type DeviceListResult } from "./api";
 
 export type DeviceListState =
   | { kind: "loading" } // only before the first-ever result; the store never returns to it
@@ -86,4 +84,4 @@ export function createDeviceListStore(fetchList: () => Promise<DeviceListResult>
   };
 }
 
-export const deviceListStore = createDeviceListStore(() => window.tvAPI.listTVs());
+export const deviceListStore = createDeviceListStore(api.listTVs);
