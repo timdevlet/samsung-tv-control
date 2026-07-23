@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/Button";
 import { HdmiIcon, KeysIcon, MoonIcon, PowerIcon, PowerOffIcon } from "../../components/icons";
+import { useDeviceList } from "../../hooks/useDeviceList";
 import type { ToastKind } from "../../lib/toasts";
-import type { CommandSettings } from "../../types";
+import type { AppSettings, CommandSettings } from "../../types";
 import "./PowerScreen.scss";
 
 // A LAN-targeted command runs a key sequence instead of a cloud action (its single target is a
@@ -84,39 +85,27 @@ function commandTvName(cmd: CommandSettings, tvNames: Map<string, string>): stri
   return tvNames.get(target) ?? target;
 }
 
-// The Main screen's data, from one fetch pair: the pinned commands (Settings → Commands, eye
-// toggled on, in stored order) and a name for every known TV — the union of the live device list
-// and the LAN-paired config entries (present even when a TV is temporarily unreachable), labeled
-// like the Settings list (alias → live label → host → id). Loaded once per mount; null until then
-// so nothing flashes in. The Main screen is mounted fresh each time the Main tab is opened (App
-// unmounts it on tab change), so re-pinning in Settings and switching back reloads this.
+// The Main screen's data: the pinned commands (Settings → Commands, eye toggled on, in stored
+// order) and a name for every known TV — the union of the device list and the LAN-paired config
+// entries (present even when a TV is temporarily unreachable), labeled like the Settings list
+// (alias → live label → host → id). The device list comes from the shared store (cached across
+// tab switches), so only the cheap local settings read runs per mount; the fresh mount per Main
+// visit (App unmounts it on tab change) still picks up re-pinning in Settings. Null until both
+// sources are in so nothing flashes in — after the first-ever load the device snapshot is already
+// cached, so revisits render as soon as the settings read lands.
 function useMainScreen(): { pinned: CommandSettings[]; tvNames: Map<string, string> } | null {
-  const [state, setState] = useState<{
-    pinned: CommandSettings[];
-    tvNames: Map<string, string>;
-  } | null>(null);
+  const { state: devices } = useDeviceList();
+  const [settings, setSettings] = useState<AppSettings | "failed" | null>(null);
 
   useEffect(() => {
     let alive = true;
-    void Promise.all([window.tvAPI.listTVs(), window.tvAPI.getSettings()]).then(
-      ([listed, settings]) => {
-        if (!alive) return;
-        const tvNames = new Map<string, string>();
-        if (listed.ok) for (const d of listed.devices) tvNames.set(d.deviceId, d.label);
-        for (const [id, cfg] of Object.entries(settings.deviceConfigs)) {
-          if (!tvNames.has(id) && cfg.host.trim()) tvNames.set(id, cfg.host);
-        }
-        for (const [id, label] of tvNames) {
-          tvNames.set(id, settings.deviceConfigs[id]?.alias.trim() || label || id);
-        }
-        setState({
-          pinned: settings.commands.filter((c) => c.pinned),
-          tvNames,
-        });
+    window.tvAPI.getSettings().then(
+      (loaded) => {
+        if (alive) setSettings(loaded);
       },
       () => {
-        // On a failed fetch, fall through to the empty state.
-        if (alive) setState({ pinned: [], tvNames: new Map() });
+        // On a failed settings read, fall through to the empty state (nothing-pinned hint).
+        if (alive) setSettings("failed");
       },
     );
     return () => {
@@ -124,7 +113,22 @@ function useMainScreen(): { pinned: CommandSettings[]; tvNames: Map<string, stri
     };
   }, []);
 
-  return state;
+  return useMemo(() => {
+    if (settings === "failed") return { pinned: [], tvNames: new Map<string, string>() };
+    if (settings === null || devices.kind === "loading") return null;
+    const tvNames = new Map<string, string>();
+    if (devices.kind === "ready") for (const d of devices.devices) tvNames.set(d.deviceId, d.label);
+    for (const [id, cfg] of Object.entries(settings.deviceConfigs)) {
+      if (!tvNames.has(id) && cfg.host.trim()) tvNames.set(id, cfg.host);
+    }
+    for (const [id, label] of tvNames) {
+      tvNames.set(id, settings.deviceConfigs[id]?.alias.trim() || label || id);
+    }
+    return {
+      pinned: settings.commands.filter((c) => c.pinned),
+      tvNames,
+    };
+  }, [devices, settings]);
 }
 
 // The main screen: one large round button per command pinned in Settings (the eye toggle), its

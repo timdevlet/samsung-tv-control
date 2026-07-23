@@ -12,10 +12,19 @@
      scrollbar). */
   padding: calc(var(--header-height) + 16px) 20px 16px 20px;
  
-  p.hint {
+  p.hint,
+  ol.hint {
     margin: 0 0 16px;
     color: var(--muted);
     font-size: 12px;
+  }
+
+  ol.hint {
+    padding-left: 18px;
+
+    li + li {
+      margin-top: 4px;
+    }
   }
 }
 

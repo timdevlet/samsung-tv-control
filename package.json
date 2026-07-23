@@ -1,6 +1,6 @@
 {
   "name": "samsung-tv-control",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Wake a Samsung TV and switch its input to PC over the LAN (Wake-on-LAN + remote WebSocket), with optional SmartThings cloud control.",
   "type": "module",
   "main": "dist-electron/main.cjs",

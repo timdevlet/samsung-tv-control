@@ -11,7 +11,8 @@ import type { AuthStatus } from "./auth.js";
 import type { AppSettings } from "./settings.js";
 
 type AuthResult = { ok: true } | { ok: false; error?: string; cancelled?: boolean };
-type DeviceListResult =
+// Exported for the renderer's device-list store (type-only import — erased at build time).
+export type DeviceListResult =
   | { ok: true; devices: STDevice[] }
   | { ok: false; error: string; notAuthorized?: boolean };
 type DeviceStatusResult =

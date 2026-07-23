@@ -21,10 +21,21 @@ export function OAuthClientFields({
 }) {
   return (
     <>
-      <p className="hint">
-        Paste the Client ID and Client Secret from your SmartThings OAuth-In app, then use Sign in
-        above to approve access — tokens are stored automatically.
-      </p>
+      <p className="hint">To get a Client ID and Client Secret:</p>
+      <ol className="hint">
+        <li>
+          Create an “OAuth-In” SmartApp in the SmartThings Developer Workspace
+          (developer.smartthings.com) or with the SmartThings CLI (smartthings apps:create).
+        </li>
+        <li>
+          Give it the scopes r:devices:*, x:devices:* and r:locations:*, and register a redirect URI
+          — the default https://httpbin.org/get works.
+        </li>
+        <li>
+          Copy the Client ID and Client Secret it generates (the secret is shown only once) into the
+          fields below, then use Sign in above to approve access — tokens are stored automatically.
+        </li>
+      </ol>
       <Field label="Client ID" htmlFor="clientId">
         <TextInput
           id="clientId"

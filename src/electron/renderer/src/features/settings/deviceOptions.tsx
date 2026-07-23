@@ -1,4 +1,5 @@
 import { Badge } from "../../components/Badge";
+import { Id } from "../../components/Id";
 import type { MultiSelectOption } from "../../components/MultiSelect";
 import type { DeviceConfigSettings } from "../../types";
 
@@ -17,7 +18,8 @@ export type DeviceOptionInput = {
 // picker, shared by the "TVs to control" selector and the Commands target selector so both look
 // identical. The primary line is the user's alias over the live label, with a "Cloud" badge for
 // SmartThings TVs; the muted subtitle is the user's note, the label an alias hides (else the model
-// name when it differs), and the opaque device id (kept visible for debugging/support).
+// name when it differs), and the opaque device id (a shortened click-to-copy chip, kept around
+// for debugging/support).
 export function deviceMultiSelectOptions(
   devices: readonly DeviceOptionInput[],
   deviceConfigs: Record<string, DeviceConfigSettings>,
@@ -27,13 +29,18 @@ export function deviceMultiSelectOptions(
     const description = deviceConfigs[device.deviceId]?.description?.trim() ?? "";
     const title = alias || device.label || device.deviceId;
     const isCloud = device.source === "cloud";
-    const subtitle = [
+    const subtitleText = [
       description || null,
       alias ? device.label : device.name && device.name !== device.label ? device.name : null,
-      device.deviceId,
     ]
       .filter(Boolean)
       .join(" · ");
+    const subtitle = (
+      <>
+        {subtitleText && `${subtitleText} · `}
+        <Id value={device.deviceId} />
+      </>
+    );
     return {
       value: device.deviceId,
       label: (

@@ -3,7 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    tags: ['v*']
+    # Version tags, with or without the leading `v` (v0.0.2 and 0.0.2 both work).
+    tags: ['v[0-9]*', '[0-9]*.[0-9]*.[0-9]*']
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -76,7 +77,7 @@ jobs:
     name: Publish release
     needs: build
     # Only publish on pushes to main (rolling "latest") or version tags (stable release).
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -97,7 +98,7 @@ jobs:
             echo "::error::No .exe or .dmg binaries were found in the artifacts."
             exit 1
           fi
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             # Stable, versioned release from the pushed tag.
             gh release create "$GITHUB_REF_NAME" "${files[@]}" \
               --title "$GITHUB_REF_NAME" \
@@ -112,3 +113,32 @@ jobs:
               --target "$GITHUB_SHA" \
               --notes "Automated build from the latest commit on main (\`${GITHUB_SHA}\`)."
           fi
+
+  bump-version:
+    name: Sync version to main
+    needs: release
+    # After a tagged release, commit the tag's version into package.json on main so the repo
+    # never drifts behind the released version.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      # GITHUB_REF still points at the pushed tag here, so sync-version picks it up even
+      # though we checked out main.
+      - run: node scripts/sync-version.mjs
+      - name: Commit version bump
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "package.json already at ${GITHUB_REF_NAME#v} — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore: bump version to ${GITHUB_REF_NAME#v}"
+          git pull --rebase origin main
+          git push origin HEAD:main
